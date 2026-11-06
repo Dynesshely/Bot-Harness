@@ -1,5 +1,7 @@
 # Bot Harness
 
+![Bot Harness banner](docs/assets/banner.png)
+
 [![CI](https://github.com/Dynesshely/Bot-Harness/actions/workflows/ci.yml/badge.svg)](https://github.com/Dynesshely/Bot-Harness/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.27%2B-00ADD8.svg)](go.mod)
@@ -1381,3 +1383,9 @@ QQBOT_LIVE_TEST=1 ENV_FILE=../../.env go test ./internal/e2e -run TestLivePipeli
 - SearxNG sidecar 是 **AGPL-3.0** 的独立容器镜像，不属于本仓库代码；
   以 compose 部署时请自行确认其许可义务。
 - 本项目不附带任何私有 CA 证书、真实环境配置或凭据。
+
+## 15. Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Dynesshely/Bot-Harness&type=Date&theme=dark)](https://star-history.com/#Dynesshely/Bot-Harness&Date)
+
+> 图表由 [star-history.com](https://star-history.com) 提供，仓库公开后自动生效。
