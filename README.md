@@ -1,5 +1,3 @@
-# Bot Harness
-
 ![Bot Harness banner](docs/assets/banner.png)
 
 [![CI](https://github.com/Dynesshely/Bot-Harness/actions/workflows/ci.yml/badge.svg)](https://github.com/Dynesshely/Bot-Harness/actions/workflows/ci.yml)
