@@ -1,0 +1,136 @@
+services:
+  bot-harness:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        # Forwarded so the image builds behind an HTTP proxy (pnpm / go mod
+        # download need it). Build-time only: they are not baked into the
+        # runtime environment, which comes from env_file below.
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+    image: bot-harness:latest
+    container_name: bot-harness
+    # All credentials and tuning come from .env — never from this file.
+    # .env is excluded from the build context and from git.
+    env_file:
+      - .env
+    environment:
+      DB_PATH: /data/bot.db
+      HTTP_ADDR: ":8080"
+      # Optional bootstrap for a private CA bundle (public certs only). Prefer
+      # setting the extra CAs in the admin UI: the value is imported on first
+      # boot and the database wins afterwards. Empty by default; set it in the
+      # gitignored .env (e.g. /app/certs/extra-ca.pem) when this deployment
+      # needs a private CA already on first boot. ./certs is mounted below.
+      TLS_EXTRA_CA_FILE: ${TLS_EXTRA_CA_FILE:-}
+      # Optional: pin a prompt file instead of the one baked into the image.
+      # SYSTEM_PROMPT_FILE: /app/prompts/system.md
+    volumes:
+      # Named volume: Docker initialises it from the image's /data, which is
+      # owned by the unprivileged botharness user — so it works with zero setup.
+      # To keep the SQLite file on the host instead, comment this out and use
+      # the bind mount below (run `mkdir -p data` first: a bind mount created
+      # by Docker is root-owned and the container would not be able to write).
+      - botdata:/data
+      # - ./data:/data
+      # Mount your own prompt file if you prefer editing it without a rebuild.
+      - ./prompts:/app/prompts:ro
+      # Optional: CA bundles for private TLS endpoints (public certs only).
+      # A fresh clone contains only README.md here; mounting the directory is
+      # harmless and lets you add/replace CAs without rebuilding the image.
+      - ./certs:/app/certs:ro
+    # Reap zombie processes now that tini is no longer in the image.
+    init: true
+    # 内部搜索 sidecar：同一 compose 默认网络，靠服务名 http://searxng:8080 访问。
+    # 故意不用 condition: service_healthy —— SearxNG 首启要建缓存，等 healthy 会把
+    # 机器人一起拖慢；启动顺序由 depends_on 保证，就绪失败由 web_search 侧重试兜底。
+    depends_on:
+      - searxng
+    # Bind address is opt-in via ADMIN_BIND: the default keeps the admin panel
+    # on loopback. Setting ADMIN_BIND=0.0.0.0 exposes it on every interface
+    # (only sensible behind a reverse proxy / on a trusted network — the token
+    # alone protects every config and chat record).
+    ports:
+      - "${ADMIN_BIND:-127.0.0.1}:8080:8080"
+    restart: unless-stopped
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # --- 内部搜索 sidecar ------------------------------------------------------
+  # 只给 bot-harness 用：不发布任何宿主端口，仅存在于 compose 默认网络，
+  # 由 bot-harness 以服务名 searxng:8080 访问（所以 .env 的 NO_PROXY 必须含 searxng，
+  # 否则 HTTP 客户端会把内网请求送进代理）。
+  #
+  # 环境变量**只**注入代理与 secret：绝不复用 bot-harness 的 env_file，
+  # 否则 QQ / 模型密钥会一起进搜索容器。
+  #
+  # 注意 compose 的插值优先级：**shell 环境变量 > .env**。若当前 shell 里已有
+  # HTTP_PROXY/NO_PROXY，这里的 ${...} 会取 shell 的值而不是 .env 的。要完全按 .env
+  # 部署，先 `set -a; . ./.env; set +a` 再 up（compose 的 shell 变量优先级高于 .env）。
+  searxng:
+    image: searxng/searxng:2026.11.1-9ded3bec1
+    container_name: bot-harness-searxng
+    restart: unless-stopped
+    environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-}
+      # 入口脚本会 chown 配置目录为镜像内的 searxng 用户 —— 那会把仓库里
+      # deploy/searxng 变成 977:977，之后人工/CI 改不动。关掉它，只保留 WARNING。
+      FORCE_OWNERSHIP: "false"
+      # :? = 缺这个键就直接拒绝解析，避免悄悄用上游默认 secret 起一个实例。
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env}
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./deploy/searxng:/etc/searxng:rw
+    stop_grace_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --- 关系型数据库（PostgreSQL 迁移目标）------------------------------------
+  # 是否使用它由 .env 的 DATABASE_URL 决定：非空走 PostgreSQL，留空回退 SQLite。
+  # 所以**故意不加** depends_on —— PG 起不来不应拖住机器人（回退路径仍然可用）。
+  #
+  # 不发布宿主端口：只走 compose 默认网络，供 bot-harness 以 postgres:5432 访问。
+  # （PG 走 PostgreSQL 原生 TCP 协议，不经 HTTP(S)_PROXY，所以不用加进 NO_PROXY。）
+  # 备份/恢复用 scripts/backup-pg.sh / scripts/restore-pg.sh（pg_dump -Fc）。
+  postgres:
+    image: postgres:17-alpine
+    container_name: bot-harness-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bot
+      POSTGRES_DB: bot
+      # :? = 缺这个键就直接拒绝解析，避免用空密码起一个库。
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # 数据放进子目录：命名卷根目录被 initdb 塞满时，将来换镜像/挂载更容易处理。
+      PGDATA: /var/lib/postgresql/data/pgdata
+    # shared_buffers 之外的共享内存（并行查询/大排序用），默认 64MB 偏小。
+    shm_size: 256mb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bot -d bot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  botdata:
+  pgdata:

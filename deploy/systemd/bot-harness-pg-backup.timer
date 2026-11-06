@@ -1,0 +1,26 @@
+# bot-harness-pg-backup.timer — 每日 04:30 触发 bot-harness-pg-backup.service
+#
+# 只启用 .timer，**不要** enable .service：
+#   systemctl enable --now bot-harness-pg-backup.timer     # 正确
+#   systemctl enable bot-harness-pg-backup.service         # 错误（开机会立刻跑一次且没有时间表）
+#
+# OnCalendar 用的是**宿主本地时区**（timedatectl 查看）。04:30 是本地 04:30；
+# 机器在 UTC 时区时等于 UTC 04:30，与 scripts/backup-pg.sh 的 UTC 时间戳目录名不冲突。
+# Persistent=true：关机/休眠错过的那次，开机后立刻补跑一次（不会连补多次）。
+#
+# 验证：
+#   systemctl list-timers 'bot-harness-pg-backup*'
+#   systemctl cat bot-harness-pg-backup.timer
+[Unit]
+Description=Daily 04:30 bot-harness PostgreSQL snapshot
+Documentation=file://<repo>/deploy/README.md
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+# 允许最多 1 分钟的抖动，避免和其他整点任务挤在一起；不影响 36h 的监控阈值。
+AccuracySec=1min
+Unit=bot-harness-pg-backup.service
+
+[Install]
+WantedBy=timers.target

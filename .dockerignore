@@ -1,0 +1,18 @@
+.git
+.gitignore
+.github
+data
+node_modules
+**/node_modules
+*.log
+*.md.bak
+# Local CA material is mounted at runtime, never baked into the image.
+certs/*.pem
+certs/*.crt
+.env
+.env.*
+!.env.example
+tests/tmp
+coverage.out
+dsh-*
+.toolchains

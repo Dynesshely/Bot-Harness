@@ -1,0 +1,32 @@
+# SearxNG 配置 — bot-harness 的内部搜索 sidecar
+#
+# 不发布宿主端口：只监听 compose 默认网络，bot-harness 通过 http://searxng:8080 访问。
+# 真实环境事实（内网 IP / 代理地址 / 主机名）不写在这里 —— 代理与 secret 全部由
+# docker-compose.yml 从 .env 插值注入，本文件因此可以安全提交。
+#
+# 验证：
+#   docker compose -f docker-compose.yml config --quiet          # compose 能解析
+#   docker compose exec searxng wget -qO- http://127.0.0.1:8080/healthz
+#
+# 下面只写与上游默认值的差异，其余沿用 use_default_settings 引入的默认配置。
+use_default_settings: true
+
+general:
+  instance_name: "bot-harness search"
+
+server:
+  # 只服务内网机器人：不做公开实例、不启用限流、不代理图片。
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  # secret_key 刻意不写死在这里：由 docker-compose 注入环境变量 SEARXNG_SECRET，
+  # 容器入口把它写成真正的 server.secret_key（见 compose 里的 :? 强校验）。
+  # bind_address / port 是上游默认值，显式写出以便看清对 bot-harness 的契约。
+  bind_address: "0.0.0.0"
+  port: 8080
+
+search:
+  # json 供 bot-harness 的 web_search 工具调用；html 便于人工打开排障。
+  formats:
+    - html
+    - json

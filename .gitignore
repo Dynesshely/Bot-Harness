@@ -1,0 +1,26 @@
+# credentials
+.env
+.env.local
+.env.*.local
+
+# local CA material: never commit certificates (see certs/README.md)
+certs/*.pem
+certs/*.crt
+
+# runtime data
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# build output
+/bin/
+/dist/
+/bot-harness
+web/node_modules/
+node_modules/
+
+# tooling
+coverage.out
+tests/tmp/
+*.log

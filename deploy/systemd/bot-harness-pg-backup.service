@@ -1,0 +1,50 @@
+# bot-harness-pg-backup.service — 每日 PostgreSQL 快照（一次性执行单元）
+#
+# 定位：这不是常驻服务，只由 bot-harness-pg-backup.timer 触发，跑完即退出。
+# 时间表在配套的 .timer 里（默认每日 04:30，Persistent=true 补跑错过的那次）。
+#
+# 前置条件（缺一个就会失败，装之前逐条核对）：
+#   1. 仓库已 clone 到 WorkingDirectory 指向的路径，scripts/backup-pg.sh 可执行；
+#   2. User= 指定的用户在 docker 组里（备份要 docker exec 进 postgres 容器，
+#      不能走 sudo，systemd 单元里没有 tty 也没人输密码）；
+#   3. POSTGRES 容器在跑（postgres 服务名，默认 bot-harness-postgres）。
+#
+# 安装：见 deploy/README.md「PG 定期备份」一节（cp + 替换占位符 + daemon-reload + 启 timer）。
+# 本文件里的 <user> / <repo> 是占位符，**必须替换**后才会指向真实路径。
+#
+# 验证（不需要真的启用）：
+#   systemd-analyze verify deploy/systemd/bot-harness-pg-backup.service
+#   sudo systemctl start bot-harness-pg-backup.service
+#   journalctl -u bot-harness-pg-backup -n 50 --no-pager
+[Unit]
+Description=bot-harness PostgreSQL snapshot (pg_dump -Fc + sha256, keep 14)
+Documentation=file://<repo>/deploy/README.md
+# 备份只跟本机 docker.sock 打交道，不需要外网；但要排在 docker 启动之后。
+# 用 Wants= 而不是 Requires=：docker 不是 systemd 管的机器上，Requires= 会让单元直接失败，
+# 而 Wants= 只是"尽量"——真没 docker 时脚本自己会报"找不到 docker"，报错更清楚。
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=<user>
+# 不写 Group=：默认取该用户的主组；写死同名组在"主组另有其名"的机器上会让单元直接起不来。
+WorkingDirectory=<repo>
+# HOME 决定脚本默认的 --out（$HOME/bot-harness-backups）。User= 通常已经带出 HOME，
+# 这里显式再写一遍，避免单元被别的 profile 改过默认值后把快照落到 /。
+Environment=HOME=/home/<user>
+# --keep 14：每日一份保留两周。轮转按快照目录名（UTC 时间戳）排序，删最旧的。
+ExecStart=/usr/bin/bash <repo>/scripts/backup-pg.sh --keep 14
+# 需要的自定义输出目录时改成：ExecStart=/usr/bin/bash <repo>/scripts/backup-pg.sh --keep 14 --out /srv/backups
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+# 导出的 dump 含全库数据，默认 umask 022 会留成 644（同机可读）；收紧到 600/700。
+UMask=0077
+# 库大时 pg_dump 可能跑几分钟；给足上限，但别让失败任务无限挂着。
+TimeoutStartSec=30min
+# 日志全部走 journal（system 单元的默认值，这里显式写出来当文档）：
+#   journalctl -u bot-harness-pg-backup -n 50 --no-pager
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bot-harness-pg-backup

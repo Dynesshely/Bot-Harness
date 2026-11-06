@@ -1,0 +1,29 @@
+# /etc/cron.d/bot-harness-pg-backup — systemd 不可用时的备选定时任务
+#
+# 安装（需要 root）：
+#   sudo cp deploy/cron/bot-harness-pg-backup /etc/cron.d/bot-harness-pg-backup
+#   sudo chown root:root /etc/cron.d/bot-harness-pg-backup
+#   sudo chmod 0644 /etc/cron.d/bot-harness-pg-backup
+#
+# 规则（cron.d 的硬性要求，违反就静默不执行）：
+#   * 文件名不能带 "."（cron 会跳过带点的文件）；
+#   * 必须 root:root 且不能给 group/other 写权限；
+#   * 每行 6 个字段：分 时 日 月 周 <user> <command>（系统级 cron 有 user 字段）。
+#
+# 本文件里的 <user> / <repo> 是占位符，**必须替换**成真实值后再装。
+# 与 systemd 版本二选一：两个都装会让同一天备份两份（不会坏，但会白白占空间）。
+#
+# 验证：
+#   sudo grep -c 'bot-harness-pg-backup' /etc/cron.d/bot-harness-pg-backup
+#   journalctl -t CRON -n 20 --no-pager          # 或 /var/log/syslog 里的 CRON 行
+#   tail -n 20 /home/<user>/bot-harness-backups/backup.log
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# cron 的默认 HOME 是 /root 或空，不显式给的话 --out 会落到错误的位置。
+HOME=/home/<user>
+
+# 每日 04:30（宿主本地时区，与 systemd timer 一致）。
+# 输出追加到备份目录里的 backup.log：每天几行，不需要 logrotate。
+# 注意：install -d 与重定向**必须**放进 bash -c 里面 —— 否则首次运行（目录还不存在时）
+# 是 cron 的 shell 在打开日志时失败，备份脚本根本不会被启动，只留一行 syslog 错误。
+30 4 * * * <user> /usr/bin/bash -c 'install -d "$HOME/bot-harness-backups" && /usr/bin/bash <repo>/scripts/backup-pg.sh --keep 14 >> "$HOME/bot-harness-backups/backup.log" 2>&1'

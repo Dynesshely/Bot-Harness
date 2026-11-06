@@ -1,0 +1,184 @@
+# CI：把「提交前要跑什么」从人脑搬到流水线。
+#
+# 机器盯着的硬规则：
+#   1. Go 侧 gofmt / go vet / go test 全绿（e2e 用内置假 QQ / 假 OpenAI，不碰真实网络与凭证）
+#   2. race 检测覆盖 e2e、bus、admin（SSE 与审计行并发是曾经真实踩过的坑）
+#   3. web/dist 是提交进仓库的构建产物 —— 源码改了没重新构建，CI 必须红
+#   4. 镜像能被 docker build 出来，Dockerfile 的 COPY / 基础镜像 digest 不是空谈
+#   5. 隐私信息（内网 IP / 个人绝对路径 / 密钥）不得进仓库
+#
+# 所有步骤只跑仓库里已经有的命令；不需要任何 secret。
+#
+# Actions 全部 pin 到 40 位 commit SHA（tag 会移动，SHA 不会）。注释里的 tag 只
+# 用于人工阅读；升级时同时更新 SHA 与注释。
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 只读依赖：CI 里不允许悄悄改 go.mod / go.sum（锁文件漂移应体现在提交里）
+  GOFLAGS: -mod=readonly
+
+jobs:
+  go:
+    name: go · vet + test + race
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: setup go (1.27.3)
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.27.3"
+          cache: true
+      - name: go 版本
+        run: go version
+      - name: go vet ./...
+        run: go vet ./...
+      - name: go test ./... -count=1
+        # internal/e2e 会起内置的假 QQ / 假 OpenAI 服务端，约一分钟；不依赖外网与真实凭证。
+        run: go test ./... -count=1 -timeout=10m
+      - name: go test -race（e2e / bus / admin + 核心包）
+        # e2e 是 SSE 事件与 finishRecord 并发读写的主要现场；bus 的不可变快照
+        # 也在这里被 race 守护。
+        run: |
+          go test -race -count=1 -timeout=15m \
+            ./internal/e2e ./internal/bus ./internal/admin ./internal/core \
+            ./internal/tools ./internal/settings ./internal/store
+
+  lint:
+    name: go · gofmt + staticcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: setup go (1.27.3)
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.27.3"
+          cache: true
+      - name: gofmt（必须为空）
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "以下文件未经过 gofmt："
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: staticcheck
+        # 与 go vet 互补（可疑比较、简化建议、无用代码等）。工具与 Go 1.27
+        # 不兼容时改为只保留上面的 gofmt + go vet。
+        #
+        # 使用 staticcheck 的默认检查集（与本地一致），仅关掉 U1000（未使用符号）：
+        # 测试 harness 的辅助方法与协议常量是刻意保留的，删掉只会让下次扩展测试时
+        # 再写一遍。
+        run: |
+          # v0.8.2（staticcheck 2026.2.2）是已在 Go 1.27 上验证过的版本；
+          # 新版本需重新验证兼容性。模块版本是 v0.8.x，不是日历版本号。
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+          "$(go env GOPATH)/bin/staticcheck" -checks=inherit,-U1000 ./...
+
+  build:
+    name: build · go + docker compose + image
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: setup go (1.27.3)
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.27.3"
+          cache: true
+      - name: go build ./...
+        run: go build ./...
+      - name: docker compose config
+        # compose 里 POSTGRES_PASSWORD / SEARXNG_SECRET 用了 ${VAR:?} 强校验；
+        # CI 只验证插值能解析，用一次性 .env，不涉及真实凭证。
+        run: |
+          printf 'POSTGRES_PASSWORD=ci-only\nSEARXNG_SECRET=ci-only\n' > .env
+          docker compose config -q
+      - name: docker build
+        # 验证 Dockerfile 的 COPY、基础镜像 digest 与多阶段构建；不推送镜像。
+        run: docker build --build-arg VERSION="ci-${GITHUB_SHA::8}" -t bot-harness:ci .
+
+  security:
+    name: security · govulncheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # 漏洞库每天在变：PR 上不阻塞（网络/数据库抖动多），main 与 tag 必须绿。
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: setup go (1.27.3)
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.27.3"
+          cache: true
+      - name: 安装 govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: govulncheck ./...
+        run: |
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+  web:
+    name: web · test / 产物 / 配置键
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: setup go（1.27.3；配置键检查用 go run）
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.27.3"
+          cache: true
+      - name: setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11
+      - name: setup node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
+      - name: pnpm test
+        run: pnpm test
+      - name: 配置键 golden（人类可读 diff）
+        # 与 internal/settings/keys_test.go 互补：这里把漂移的键名直接打到 CI 日志，便于定位。
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/check-config-keys.sh
+      - name: 构建产物与源码一致
+        # scripts/check-dist.sh 会跑 pnpm build（含 vue-tsc）再逐文件比对 sha256，
+        # 等价于 pnpm build && git diff --exit-code web/dist，但对新增/改名/删除的文件同样敏感。
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/check-dist.sh
+
+  hygiene:
+    name: hygiene · 隐私扫描
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: 隐私扫描（内网 IP / 个人绝对路径 / 密钥 / 内网域名）
+        run: bash scripts/privacy-scan.sh

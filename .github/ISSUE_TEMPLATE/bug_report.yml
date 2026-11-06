@@ -1,0 +1,84 @@
+name: Bug report
+description: 报告可复现的功能缺陷
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请先搜索已有 issue，并确认这不是部署/配置问题。
+        **安全漏洞请不要走这里**，见 SECURITY.md。
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 镜像 tag / commit / `/api/status` 里的 version
+      placeholder: "例如 v0.1.0 或 770c3af"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deploy
+    attributes:
+      label: 部署方式
+      options:
+        - docker compose
+        - 单容器 docker run
+        - 直接运行二进制
+        - 本地开发（go run / pnpm dev）
+        - 其他
+    validations:
+      required: true
+
+  - type: dropdown
+    id: storage
+    attributes:
+      label: 存储后端
+      options:
+        - PostgreSQL
+        - SQLite
+        - 不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 现象
+      description: 实际发生了什么？期望是什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 尽量给出最小、可重复的步骤
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 截图
+      description: |
+        请先脱敏：删除 token、Cookie、DSN、内网地址、个人路径。
+        后台「日志」页或 `docker compose logs bot-harness --tail=200` 均可。
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 确认
+      options:
+        - label: 已搜索过现有 issue
+          required: true
+        - label: 已移除日志/截图中的凭据、DSN、内网地址与个人路径
+          required: true
