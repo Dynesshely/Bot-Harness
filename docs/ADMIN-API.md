@@ -1,12 +1,13 @@
-# Admin API 契约（冻结版 v1.8）
+# Admin API 契约（冻结版 v1.9）
 
 > 本文件是前后端唯一契约。字段只增不改；新增字段前端必须容错。
 > 所有路径以 `/api` 为前缀。除标注 **公开** 外，全部需要认证。
 >
 > 本文件已按实际 handler（`internal/admin/*.go`）逐条核对，修订记录见 §0.1
-> （v1.7 → v1.8：情绪状态 `affect`；新增 6 个配置键、7 组端点与 5 个计数器），
-> 更早的修订为 §0.1.1（承诺可从后台取消）、§0.1.2（承诺追问与人类状态）、
-> §0.1.3（QQ 指令面板）、§0.1.4（Bot 命令与 `/help`）、§0.1.5（两阶段生成）。
+> （v1.8 → v1.9：自主加入 `join_gate`；新增 9 个配置键、2 个只读端点与 5 个计数器），
+> 更早的修订为 §0.1.1（情绪状态 `affect`）、§0.1.2（承诺可从后台取消）、
+> §0.1.3（承诺追问与人类状态）、§0.1.4（QQ 指令面板）、§0.1.5（Bot 命令与 `/help`）、
+> §0.1.6（两阶段生成）。
 > 三处历史漂移（SSE 事件集合、分页 `page_size` 回显、写接口的三秘密脱敏）已修复，
 > 本文件据此定稿；以后改动 handler 响应的提交必须同步本文件（契约测试在 `internal/admin/*_test.go`）。
 
@@ -40,7 +41,28 @@
   由 `settings.MaskSecret` 实现。`qq_app_secret` / `openai_api_key` / `admin_token`
   三个秘密**只进不出**（见 §3 的三秘密说明）。
 
-### 0.1 修订速览（v1.7 → v1.8）：情绪状态（affect）
+### 0.1 修订速览（v1.8 → v1.9）：自主加入（join_gate）
+
+新增「未 @ 群消息由模型判断是否加入」及其后台与只读 API。**默认关闭**，关闭时回复管线、
+触发模式与现有接口响应**零变化**；没有新增消息状态。
+
+- **9 个配置键**（§3）：`join_gate_enabled`（默认 false）、`join_gate_mode`（默认 `llm`）、
+  `join_gate_model`（默认空串 = 主模型）、`join_gate_window`（默认 20，[5,50]）、
+  `join_gate_confidence`（默认 0.7，[0,1]）、`join_gate_eval_cooldown_seconds`
+  （默认 60，[10,3600]）、`join_gate_min_interval_minutes`（默认 5，[1,240]）、
+  `join_gate_max_per_hour`（默认 3，[1,30]）、`join_gate_max_per_day`（默认 12，[1,100]）。
+  按群覆盖新增 `group_overrides[].join_gate`（`bool | null`）。
+- **2 个只读端点**（§6.8）：`GET /api/join/decisions`、`GET /api/join/topics`。全部 protected；
+  没有写端点，启用与参数仍走 `PUT /api/config`。
+- **5 个计数器**（§2）：`join_gate_evals`、`join_gate_joins`、`join_gate_skips`、
+  `join_gate_errors`、`join_gate_topics`，`counters` 由 **24 项变成 29 项**。
+- **1 个后台页**：新路由 `/join`（nav「自主加入」），保存走既有 `PUT /api/config`。
+- **迁移**：SQLite `0014_join_gate`；PostgreSQL 在 `pgSchema` 增加 `join_decisions` /
+  `join_topics` 两表与索引。两表都是新增表，旧版本会忽略它们。
+- **没有新增消息状态**：`records.status` 的枚举不变；判定结果不写 `messages`，
+  decision 只存截断后的消息预览，不存消息全文。
+
+### 0.1.1 修订速览（v1.7 → v1.8）：情绪状态（affect）
 
 新增「按会话持久化的情绪状态」及其后台、API 与命令。**默认关闭**，关闭时回复管线、
 润色、proactive 与现有接口响应**零变化**；没有修改任何既有字段或消息状态。
@@ -54,7 +76,7 @@
   + 4 个控制 POST（pause / resume / preset / reset）。全部 protected；
   错误沿用标准信封与 §8 错误码。
 - **5 个计数器**（§2）：`affect_ticks`、`affect_events`、`affect_injections`、
-  `affect_inject_chars`、`affect_errors`，`counters` 由 **18 项变成 23 项**。
+  `affect_inject_chars`、`affect_errors`，`counters` 由 **19 项变成 24 项**。
 - **1 个管理员命令**：`/mood`（别名 `mood`），用法
   `/mood [status|pause 分钟|resume|preset 名称|reset]`；入站 `command`、出站 `replied`，
   不调模型、不写会话上下文。
@@ -64,7 +86,7 @@
 - **没有新增消息状态**：`records.status` 的枚举不变；affect 不写 `messages`，
   事件日志只存事件 id / tone / source / 时间，不存消息原文。
 
-### 0.1.1 修订速览（v1.6 → v1.7）：承诺可从后台取消
+### 0.1.2 修订速览（v1.6 → v1.7）：承诺可从后台取消
 
 只新增**一个写端点**，`Commitment` 的字段与状态枚举**没有任何变化**：
 
@@ -79,7 +101,7 @@
   状态中文标签为「等待追问 / 追问中 / 已完成 / 已取消」；取消按钮不再有 404/405 只读退化。
 - **没有新增记录状态、没有新增配置键、没有 schema 改动**：取消只是既有行的一次 UPDATE。
 
-### 0.1.2 上一轮修订速览（v1.5 → v1.6）：承诺追问与人类状态
+### 0.1.3 上一轮修订速览（v1.5 → v1.6）：承诺追问与人类状态
 
 新增两组后台可观测能力：**承诺（open loop）追问**与**人类状态感知**。
 
@@ -105,7 +127,7 @@
 - 承诺追问的**频率由模型判断**，代码只做 `>=60s` / `<=180d` 的技术防呆；
   **勿扰只认记忆**（不设代码静默时段），追问**原路返回**（群→群、私聊→私聊）。
 
-### 0.1.3 历史修订速览（v1.4 → v1.5）：QQ 指令面板
+### 0.1.4 历史修订速览（v1.4 → v1.5）：QQ 指令面板
 
 把命令注册表投影成平台侧的「指令面板」，让用户点开就能看到命令。契约新增
 **一个运维端点 + 一个配置键**；`records.status` 的枚举**没有任何变化**：
@@ -124,7 +146,7 @@
 - 自动同步与手动动作走**同一条** `Dispatcher.SyncCommandPanel`（`panelMu` 串行化），
   所以两者不会各自读到旧版本再各写一次。
 
-### 0.1.4 历史修订速览（v1.3 → v1.4）：Bot 命令（`/tokenstats`）与 `/help`
+### 0.1.5 历史修订速览（v1.3 → v1.4）：Bot 命令（`/tokenstats`）与 `/help`
 
 新增了「聊天内命令」这条**不经过模型**的路径。**没有新增端点、没有新增配置键**，
 契约只多了一个审计状态值：
@@ -141,7 +163,7 @@
 - 命令自身的口径：不计 `ai_requests`、不做润色、不施加人味延迟、不写 `messages` 表；
   入站 `status=command`、出站 `status=replied`，一对审计行都绑定同一条 `msg_id`。
 
-### 0.1.5 历史修订速览（v1.2 → v1.3）：两阶段生成（润色）
+### 0.1.6 历史修订速览（v1.2 → v1.3）：两阶段生成（润色）
 
 一次回复变成「主模型草稿 → 无上下文润色 → 发送润色稿」，只动了三处，没有新增端点：
 
@@ -251,7 +273,7 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
 {
   "ok": true,
   "data": {
-    "version": "0.2.0",
+    "version": "0.3.0",
     "started_at": "2026-07-21T10:00:00+08:00",
     "uptime_seconds": 3600,
     "transport": "websocket",
@@ -308,7 +330,9 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
       "human_status_runs": 18, "human_status_failures": 1,
       "human_status_image_calls": 6,
       "affect_ticks": 288, "affect_events": 47, "affect_injections": 132,
-      "affect_inject_chars": 9860, "affect_errors": 1
+      "affect_inject_chars": 9860, "affect_errors": 1,
+      "join_gate_evals": 64, "join_gate_joins": 9, "join_gate_skips": 55,
+      "join_gate_errors": 2, "join_gate_topics": 60
     }
   }
 }
@@ -325,7 +349,7 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
 - `ai.base_url` 是**当前生效**的端点（数据库设置），不是 `.env` 的值：
   `base_url_set` / `api_key_set` 告诉前端「配没配」，空串 = 未配置。
 - `webhook.path` 是设置的 `qq_webhook_path`。
-- `counters` 就是进程内计数器的全部 **23** 项（没有 `tool_calls` / `proactive_sent` 计数器）。
+- `counters` 就是进程内计数器的全部 **28** 项（没有 `tool_calls` / `proactive_sent` 计数器）。
   其中 `polish_requests` / `polish_fallbacks` 属于两阶段生成：前者是**真的发出去**的 stage 2 请求数
   （润色被跳过——开关关、草稿为空、低于 `polish_min_chars`——不计），后者是其中失败回退到草稿的次数，
   因此恒有 `polish_fallbacks <= polish_requests`。两者都是 0 且回复正常 = 润色没开或被全部跳过。
@@ -334,6 +358,10 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
   `affect_injections` 是**非空**注入次数（档位 `off`、暂停、空状态不计）；
   `affect_inject_chars` 是注入块总字符数（用于估算预算）；`affect_errors` 是读 / 写 / 渲染失败次数。
   不新增按群维度，全部是进程内累计值，重启归零。
+- 后 5 项属于自主加入：`join_gate_evals` 是**实际调用模型**的评估次数（闸门超限不计）；
+  `join_gate_joins` 是判定加入并进入回复管线的次数；`join_gate_skips` 是预检超限或判定不加入的次数；
+  `join_gate_errors` 是读库 / 模型 / 解析 / 超时失败次数；`join_gate_topics` 是成功保存话题切分的次数。
+  同样不新增按群维度，重启归零。
 - `store` 是**引擎无关**的一块，六项固定返回、含义随驱动变化：
 
   | 字段 | PostgreSQL | SQLite |
@@ -413,6 +441,7 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
 | 承诺追问 | `commitment_enabled`、`commitment_max_open_per_member` |
 | 人类状态 | `human_status_enabled`、`human_status_trigger_messages`、`human_status_ttl_minutes`、`human_status_timeline_messages`、`human_status_vision_enabled`、`human_status_vision_model` |
 | 情绪状态（affect） | `affect_enabled`、`affect_pack`、`affect_inject_mode`、`affect_event_classifier`、`affect_tick_seconds`、`affect_inject_max_tokens`（按群覆盖用 `group_overrides[].affect` / `affect_inject_mode`） |
+| 自主加入（join_gate） | `join_gate_enabled`、`join_gate_mode`、`join_gate_model`、`join_gate_window`、`join_gate_confidence`、`join_gate_eval_cooldown_seconds`、`join_gate_min_interval_minutes`、`join_gate_max_per_hour`、`join_gate_max_per_day`（按群覆盖用 `group_overrides[].join_gate`） |
 | 两阶段生成（润色） | `polish_enabled`、`polish_model`、`polish_temperature`、`polish_max_tokens`、`polish_timeout_seconds`、`polish_min_chars`（按群覆盖用 `group_overrides[].polish`） |
 | 主动消息 | `proactive_level`、`proactive_ratio`、`proactive_max_credits`、`proactive_quiet_start`、`proactive_quiet_end`、`proactive_min_interval_minutes` |
 | 接入与运维 | `qq_app_id`、`qq_app_secret`、`qq_sandbox`、`qq_transport`、`qq_intents`、`qq_shard_count`、`qq_webhook_path`、`qq_bot_openid`、`command_panel_enabled`、`admin_token`、`http_addr`、`tls_extra_ca_files`、`tls_insecure_verify`、`log_level`、`log_buffer_size` |
@@ -496,6 +525,15 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
   `false` 是可靠关闭。状态只影响表达，不影响事实、工具与安全策略；
   默认关是刻意的（见 D-047）。完整设计见
   [AFFECT.md](AFFECT.md)。
+- **自主加入（join_gate）**：`join_gate_enabled` 默认 **false**；关闭时未 @ 群消息只记录、
+  不评估、不写表。`join_gate_mode` ∈ `off` / `llm`（默认 `llm`；`off` 表示不进入 join gate，未 @ 消息仍走原 trigger gate）；
+  `join_gate_model` 默认空串（= 主模型）；`join_gate_window` 默认 20（5–50）；
+  `join_gate_confidence` 默认 0.7（0–1）；`join_gate_eval_cooldown_seconds` 默认 60（10–3600）；
+  `join_gate_min_interval_minutes` 默认 5（1–240）；`join_gate_max_per_hour` 默认 3（1–30）；
+  `join_gate_max_per_day` 默认 12（1–100）。按群覆盖用 `group_overrides[].join_gate`
+  （`bool | null`）；**全局 `join_gate_enabled` 是总开关**，群覆盖只能进一步关闭，
+  不能越过全局关。判定与话题切分在同一次 LLM 调用里完成；解析失败 / 超时 / 非法 JSON
+  一律不加入（fail-closed）。完整设计见 [JOIN-GATE.md](JOIN-GATE.md)。
 - **人味**：`humanize_level` ∈ `off` / `soft` / `medium` / `strong`（默认 `medium`，空或未知值按 `medium`）。
   `humanize_delay_scale` 默认 1（0.5–3），乘在所有停顿上；`persona` 是一句话人设，附加到系统提示词。
   按群覆盖用 `group_overrides[].humanize`。
@@ -656,7 +694,7 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
         "quote_reply": true, "tools": true, "proactive": "auto", "tasks": true,
         "memory": true, "humanize": "medium", "web": true, "exec": false,
         "polish": false, "affect": true, "affect_inject_mode": "line",
-        "rate_limit_group_qpm": 30 }
+        "join_gate": true, "rate_limit_group_qpm": 30 }
     ],
     "blocked_keywords": ["政治", "违法"],
     "reply_to_bots": true,
@@ -674,9 +712,10 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
   `context_scope=include_unaddressed` 但某些群生效的上下文模式是 C1；还没读到任何群状态。
 - `group_overrides[]` 的字段全部 `omitempty`：`enabled`、`trigger_mode`、`context_mode`、
   `context_scope`、`reply_to_bots`、`quote_reply`、`tools`、`proactive`、`tasks`、`memory`、
-  `humanize`、`web`、`exec`、`polish`、`affect`、`affect_inject_mode`、`rate_limit_group_qpm`。
-  **缺省 / `null` = 跟随全局**，覆盖优先级高于全局值（**affect 例外**：全局
-  `affect_enabled` 是总开关，见下）。
+  `humanize`、`web`、`exec`、`polish`、`affect`、`affect_inject_mode`、`join_gate`、
+  `rate_limit_group_qpm`。
+  **缺省 / `null` = 跟随全局**，覆盖优先级高于全局值（**affect / join_gate 例外**：
+  全局总开关，见下）。
 - `group_overrides[].polish` 是**两阶段生成**的按群开关（`bool | null`）：`true` 强制开、`false` 强制关、
   `null` = 跟随全局 `polish_enabled`。它只覆盖**开关**；6 个 `polish_*` 参数是全局的，没有按群版本。
   保存时必须原样透传（前端 `toGroupOverridePayload` 不做白名单重建），否则改一行 QPM 会把别的群的润色设置抹掉。
@@ -685,6 +724,10 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
   都不生效，群里的 `true` 不能越过；全局开启后群 `false` 是可靠的紧急关闭。
   `affect_inject_mode` 覆盖该群档位（`off` / `line` / `full`；`null` = 跟随全局）。
   这两项同样必须原样透传；其余 4 个 `affect_*` 键只有全局值，没有按群版本。
+- `group_overrides[].join_gate` 是**自主加入**的按群开关（`bool | null`）：`null` 跟随全局、
+  `false` 强制关闭、`true` 显式开启。**全局 `join_gate_enabled` 是总开关**：全局关时所有群
+  都不生效，群里的 `true` 不能越过；全局开启后群 `false` 是可靠的紧急关闭。
+  它同样必须原样透传；其余 8 个 `join_gate_*` 键只有全局值，没有按群版本。
 - 空数组表示**不限制**（白名单 / 屏蔽词）。
 - `trigger_mode` ∈ `at_only`（E1）| `all_messages`（E2）；
   `context_mode` ∈ `per_member`（C1）| `shared`（C2）；
@@ -1375,6 +1418,90 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
 
 > 上表即**契约事件集合**（共 6 个）：服务端把总线事件名原样转发，新增事件名要先进这张表再被前端使用。
 
+## 6.8 自主加入（join_gate）
+
+后台 `/join` 页使用这组端点。全部 **protected**；除特别说明外，错误信封与 §8
+通用错误码一致。判定与话题都是**内部状态**，不写进用户可见消息；接口不返回消息全文，
+decision 里只有截断后的预览。没有写端点：启用与参数仍走 `PUT /api/config`。
+
+**2 个只读端点**：`GET /api/join/decisions`、`GET /api/join/topics`。
+`join_gate_enabled` 默认 **false**；关闭时端点仍可读历史记录，但不会产生新的评估。
+
+### `GET /api/join/decisions?group_openid=&limit=`
+
+最近判定记录，按 `created_at DESC`。
+
+| 参数 | 默认 | 范围 | 说明 |
+|---|---|---|---|
+| `group_openid` | 空 | ≤256 rune | 空串 = 全部群；非空只返回该群；超长 → `400 invalid_request` |
+| `limit` | 50 | 1–200 | 返回条数；非数字 / 越界 → `400 invalid_request`（不静默夹取） |
+
+```json
+{
+  "ok": true,
+  "data": {
+    "decisions": [
+      {
+        "id": 128, "group_openid": "B2C3...", "conversation_id": "c_...",
+        "message_id": "m_...", "speaker": "小明",
+        "preview": "有人懂这家店吗？周六想约个饭。",
+        "joined": true, "confidence": 0.82,
+        "reason": "明确求助且 bot 参与过话题",
+        "topics": "[{\"id\":\"t1\",\"title\":\"周末聚餐\",\"summary\":\"在约周六晚饭。\",\"message_ids\":[12,13]}]",
+        "model": "deepseek-chat", "latency_ms": 840,
+        "created_at": "2026-11-10T12:00:00+08:00"
+      }
+    ]
+  }
+}
+```
+
+- `joined` 是最终结果：`false` 可能是模型判定不加入，也可能是闸门超限或评估失败，
+  具体看 `reason`（`cooldown` / `rate` / `gate error: …` / 模型原因）。
+- `preview` 最多 **80 字**；不返回消息全文。
+- `topics` 是 **JSON 字符串**（存储层原样返回），内容是话题数组；前端解析时对
+  「字符串 / 数组 / 空串」都容错。没有话题时为空串。
+- `confidence` 是模型自评的 0–1 小数，不是系统二次计算的结果。
+- 没有记录时返回空数组，不是 404。
+
+### `GET /api/join/topics?group_openid=`
+
+该群最近一次话题切分缓存。
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `group_openid` | 是 | 群 openid；缺失、空或超过 256 rune → `400 invalid_request` |
+
+```json
+{
+  "ok": true,
+  "data": {
+    "topics": {
+      "group_openid": "B2C3...",
+      "topics": "[{\"id\":\"t1\",\"title\":\"周末聚餐\",\"summary\":\"几个人在约周六晚饭的时间和地点。\",\"message_ids\":[12,13,14]}]",
+      "analyzed_at": "2026-11-10T12:00:00+08:00"
+    }
+  }
+}
+```
+
+- `topics` 是记录 **1–8 个话题**的 JSON 字符串；`message_ids` 只包含输入窗口里出现过的 id。
+- 缓存只在**解析成功**时覆盖；模型失败时保留上一次。
+- **没有缓存时 `topics` 为 `null`**（200，不是 404），页面展示空状态。
+- 供回复注入的缓存只取最近 **15 分钟**、最多 **400 字**；该端点返回完整缓存，
+  方便后台核对，不代表注入会全部使用。
+
+### join_gate 错误码
+
+| HTTP | code | 场景 |
+|---|---|---|
+| 400 | `invalid_request` | `limit` 非数字 / 越界，`group_openid` 超过 256 rune 或缺失（topics） |
+| 401 | `unauthorized` | 未登录 |
+| 500 | `store_error` | 数据库读失败 |
+| 503 | `unavailable` | 存储未接线（`deps.Store == nil`） |
+
+- 没有 `404`：没有 decision 返回空数组，没有 topics 返回 `topics: null`。
+
 ## 7. 统计
 
 ### `GET /api/stats?range=24h`
@@ -1522,7 +1649,8 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
 - 技术：Vue 3 + Vite + Vue Router + Tailwind CSS（纯 utility class，不引组件库）。
 - 页面：登录、概览（状态卡 + SSE 实时事件流 + 统计）、会话管理（列表 + 详情 + 清空/启停/合并 + 手动发送 + 引用回复）、
   策略配置（触发模式、上下文模式与范围、白名单、按群覆盖）、消息记录、日志、工具调用、长期记忆、定时任务、
-  情绪状态（`/affect`：5 维、历史曲线、事件、注入预览、暂停/恢复/预设/重置）、系统设置（6 个二级子页面）。
+  情绪状态（`/affect`：5 维、历史曲线、事件、注入预览、暂停/恢复/预设/重置）、
+  自主加入（`/join`：启用与 9 个参数、群选择、最近决策、最新话题）、系统设置（6 个二级子页面）。
 - 构建：`pnpm install` 后 `pnpm build` 必须成功（含类型检查），产物 `web/dist/index.html` + `web/dist/assets/*`。
 - 单测：`pnpm test`（vitest），测试放 `web/src/**/__tests__/`。
 - 开发代理：`vite.config.ts` 中 `/api` 代理到 `http://127.0.0.1:8080`。

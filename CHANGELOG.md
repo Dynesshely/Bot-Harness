@@ -21,6 +21,60 @@
 - `web/package.json`：公开包（`private: false`）、Apache-2.0、版本 `0.1.0`、仓库地址、
   锁定 `pnpm@11.25.0`。
 
+## [0.3.0] - 2026-11-10
+
+> 版本号 **0.3.0 待 Lead 确认**；确认后再统一更新 `internal/config.Version`、Dockerfile 与
+> `web/package.json`。本节按 0.3.0 记录，功能开关默认关闭。
+
+自主加入（join_gate）：未 @ 的群消息由模型判断是否值得接话，并在同一次调用里完成话题切分。
+**默认关闭**；关闭时回复、触发模式、proactive 与 0.2.0 完全一致。
+
+### Added
+
+- **自主加入（join_gate）**：群聊未 @ 文本消息先过闸门，再由一次 LLM 调用产出
+  `join` / `confidence` / `reason` 与 1–8 个话题（`title` / `summary` / `message_ids`）；
+  判定加入后进入原回复管线，解析失败 / 超时 / 非法 JSON 一律 fail-closed。
+- **硬闸门**：消息长度 ≥2 rune、评估冷却（默认 60s）、每小时 / 每天加入上限（3 / 12）、
+  最小加入间隔（5 分钟）、置信度下限（0.7）；超限不调模型，但仍写 decision。
+- **话题背景**：最近一次话题缓存（每群一行）在 15 分钟内、以 ≤400 字作为回复背景注入，
+  放在 affect 块之后；不要求模型强行转回话题。
+- **后台页**：新路由 `/join`（侧栏「自主加入」）—— 启用与 9 个参数、群选择、
+  最近决策列表、最新话题面板、一键启用 / 停用与成本提示。
+- **设置**：`join_gate_enabled`（false）、`join_gate_mode`（`llm`）、`join_gate_model`（空）、
+  `join_gate_window`（20）、`join_gate_confidence`（0.7）、`join_gate_eval_cooldown_seconds`（60）、
+  `join_gate_min_interval_minutes`（5）、`join_gate_max_per_hour`（3）、
+  `join_gate_max_per_day`（12）；`group_overrides[]` 新增 `join_gate`。
+- **API**：`GET /api/join/decisions`、`GET /api/join/topics`；`GET /api/status` 新增 5 个计数器
+  （`join_gate_evals` / `join_gate_joins` / `join_gate_skips` / `join_gate_errors` /
+  `join_gate_topics`）。
+- **存储**：SQLite 迁移 `0014_join_gate`；PostgreSQL `pgSchema` 新增 `join_decisions` /
+  `join_topics` 两表与索引；会话删除 / 清空级联清理 decisions。
+- **文档**：新增 [docs/JOIN-GATE.md](docs/JOIN-GATE.md)；README 增加 §5.17；
+  ADMIN-API 升到 v1.9（§6.8）；DECISIONS 增加 D-048；AGENTS 增加第 21 条。
+
+### Changed
+
+- `GET /api/status` 的 `counters` 由 **24 项变为 29 项**（新增 join_gate 5 项；既有字段不变）。
+- `GET /api/config` 的 `editable`、`PUT /api/config` 与 `/api/policies` 的按群覆盖
+  接受 join_gate 键；配置键 golden 需同步。
+- `GET /api/policies` 的 `group_overrides[]` 增加 `join_gate`（`bool | null`）；
+  全局 `join_gate_enabled` 是总开关，群覆盖只能进一步关闭。
+- 后台导航新增「自主加入」（`/join`）；前端需同步 `web/dist` 产物。
+
+### Security
+
+- join_gate **默认关闭**；全局 `join_gate_enabled` 是总开关，群覆盖不能越过全局关。
+- **只处理群聊**：私聊、命令、空消息、机器人自己的消息、其他机器人的普通发言都不评估；
+  join_gate 排在 trigger gate 之前：开启后 `at_only` 下被判定加入的未 @ 消息也会回复，
+  关闭时行为不变；`@` 消息永远跳过 join_gate。
+- **fail-closed**：解析失败 / 超时 / 非法 JSON / 并发额度拿不到时一律不加入，
+  失败不能让一条本可回复的消息失败。
+- decision 里的消息预览 **≤80 字**，日志不记消息全文；不把系统提示词交给模型，
+  模型只输出 JSON，不生成回复。
+- 不做用户画像、不写记忆、不跨群聚合；不做骚扰 / 广告 / 引流；
+  频率是硬闸门（评估冷却、每小时 / 每天上限、最小间隔、置信度）。
+- 不做向量聚类、不建 embedding / 向量库，没有规则版判定。
+
 ## [0.2.0] - 2026-11-10
 
 情绪状态（affect）框架与内置 `daily` 内容包。**默认关闭**；关闭时回复、润色与主动消息
@@ -56,7 +110,7 @@
 
 ### Changed
 
-- `GET /api/status` 的 `counters` 由 **18 项变为 23 项**（新增 affect 5 项；既有字段不变）。
+- `GET /api/status` 的 `counters` 由 **19 项变为 24 项**（新增 affect 5 项；既有字段不变）。
 - `GET /api/config` 的 `editable`、`PUT /api/config` 与 `/api/policies` 的按群覆盖
   接受 affect 键；配置键 golden 同步。
 - README、`internal/config.Version`、Dockerfile 与 `web/package.json` 统一为 **0.2.0**。
