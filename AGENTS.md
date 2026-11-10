@@ -173,12 +173,55 @@ bash scripts/restore-pg.sh ~/bot-harness-backups/bot-<UTC 时间戳>            
     空消息、机器人自己的消息、其他机器人的普通发言都不评估，不读私聊内容。
     **@ 消息永远跳过 join_gate**；join_gate 排在 trigger gate 之前，开启后 `at_only` 下
     被判定加入的未 @ 消息也会回复（关闭时行为不变）。
-    模型只输出 JSON（判定 + 话题），不生成回复；判定加入后仍走原管线。
-    解析失败 / 超时 / 非法 JSON / 拿不到并发额度一律 **fail-closed**，失败不插话、
-    不能让一条本可回复的消息失败。decision 里的 `preview` **≤80 字**，日志不记消息全文；
+    **引用机器人也算被寻址**：入站的 `ref_msg_idx` 用 `store.IsBotQuote` 比对**本群、
+    assistant** 消息的 `quote_index`，命中即 `AtBot=true` / `ReplyToBot=true`，与 @ 同样
+    跳过 join gate。识别必须 fail-open（1s 超时、失败只 DEBUG、按未命中处理），
+    **绝不能因为它拖慢或中断一条回复**；也不得把引用识别扩成跨群或跨会话匹配。
+    **输出是三分类 `action` = `join` / `wait` / `skip`**（外加 `addressed_to`），不是布尔：
+    `joined` 由 `action=="join"` 派生，`wait` / `skip` 只写 decision、不回复。`wait` 允许
+    在 `join_gate_wait_retry_seconds` 后**由该群的下一条新消息**触发提前重评估（绕过评估冷却，
+    仍受频率闸门约束）；**不要**给 `wait` 排定时器或后台轮询，那会凭空产生模型调用。
+    模型只输出 JSON（判定 + 地址 + 话题，话题可带 `type` / `status` / `resumable`），
+    不生成回复；判定加入后仍走原管线。
+    **话题生命周期是单向棘轮**：模型给出 `active` / `dormant` / `closed` 与 `resumable`，
+    代码按话题最新消息的年龄只降不升——`join_gate_topic_dormant_minutes`（默认 20）把
+    `active` 降为 `dormant`，`join_gate_topic_closed_minutes`（默认 180）把任何非 `closed`
+    降为 `closed`；时间流逝永远不会把 `closed` 升回来。`closed` 强制
+    `resumable=false`（不接、不旧事重提），`active` 强制 `resumable=true`，`dormant` 保留
+    模型值。保存前必须跑一次年龄兜底，缓存里只能存**已降级**的状态；读取回灌时以
+    `analyzed_at` 作兜底时间重跑。上次话题最多回灌 **8 条 / 500 rune**，只用于判断
+    「是否旧事重提」；回复背景只取 15 分钟内、≤400 字，全部 `closed` 时不注入。
+    `closed` 是提示词 + `resumable=false` 的输入约束，**不要**把它写成代码层硬过滤
+    `action` 的逻辑（模型仍可因明确重新提起而选择 `join`）；话题状态 / 类型只用于展示与
+    提示，不参与频率、安全或权限判断。新增生命周期 / 阈值行为要补年龄降级、单向性、
+    closed 不可接回、上次话题预算与回复块测试。
+    解析失败 / 超时 / 非法 JSON / 非法 `action` / 拿不到并发额度一律 **fail-closed**
+    （记 `action=skip`、`joined=false`），失败不插话、不能让一条本可回复的消息失败。
+    decision 里的 `preview` **≤80 字**，日志不记消息全文；
     不把系统提示词交给模型，不写用户画像与记忆。**不做骚扰 / 广告 / 引流**，不按个人追问；
     频率是硬闸门（评估冷却、每小时 / 每天加入上限、最小加入间隔、置信度），超限不调模型。
-    不做向量聚类、不跨群、没有规则版；改行为要补闸门 / 解析 / fail-closed / 触发顺序测试。
+    不做向量聚类、不跨群、没有规则版；改行为要补闸门 / 解析 / 引用识别 / fail-closed /
+    触发顺序测试。
+22. **图片工具是视觉能力的按需出口，不是把图片塞满上下文**（`internal/core/vision_parts.go` +
+    `internal/tools/vision.go` + `docs/VISION.md`）：
+    入站时把**当前消息**、**引用消息**与**合并 / 转发消息**里的图片都缓存下来：当前消息读顶层
+    `attachments`，引用 / 合并必须递归展开 `msg_elements`（平台不把它们放进顶层字段），
+    否则引用图永远没有 `media_id`。图片按 sha256 内容寻址；非图片附件只记元数据。
+    模型可见的 id **只通过标注进入提示词**：当前消息 `[图片 #id]`、引用 / 合并
+    `[引用图片 #id]`，历史消息里已缓存的图片也要在模型输入副本里标；标注**不写进落库正文**，
+    也不改变消息内容。
+    **只在 `vision_enabled` 且工具开启时下发 `view_image`**（全局开关；没有按群覆盖）；
+    当前消息图片可按 `vision_max_images` 内联，引用 / 合并图片**不内联**，只走工具。
+    关闭视觉时不要内联、不要声明工具；若模型被旧上下文诱导调用，工具内部还要再判一次并返回
+    「图片不可用：视觉能力未启用」文本。
+    **复用 `human_status_vision_model`**（空 = 主模型），不要新增视觉模型键；
+    它与 `human_status_vision_enabled` / `analyze_image` 是两条独立开关，互不复用。
+    工具参数只有 `media_id`（必填）与 `question`（可选，≤200 字），结果 ≤500 字；
+    失败（id 不存在 / 过期、不是图片、未配置模型、视觉调用失败 / 空结果）**一律返回文本、
+    不返回 Go error、不阻断回复**；下载 / 存储失败也只记 WARN，消息照常处理。
+    图片只发给配置的视觉端点；不提供跨会话图片列表 / 搜索，工具审计不落返回描述；
+    描述可能看错，不能当事实来源；默认提示词不推断年龄 / 性别 / 健康等敏感属性。
+    改这条路径要补当前 / 引用 / 合并来源、历史标注、视觉关闭、失败降级与多模态回退测试。
 
 ## 3. 修改配置项
 

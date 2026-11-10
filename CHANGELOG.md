@@ -26,51 +26,76 @@
 > 版本号 **0.3.0 待 Lead 确认**；确认后再统一更新 `internal/config.Version`、Dockerfile 与
 > `web/package.json`。本节按 0.3.0 记录，功能开关默认关闭。
 
-自主加入（join_gate）：未 @ 的群消息由模型判断是否值得接话，并在同一次调用里完成话题切分。
-**默认关闭**；关闭时回复、触发模式、proactive 与 0.2.0 完全一致。
+自主加入（join_gate）：未 @ 的群消息由模型判断要不要接话，并在同一次调用里完成
+**三分类**（join / wait / skip）、`addressed_to` 与话题切分；引用机器人视同被 @；
+话题带生命周期（`active` / `dormant` / `closed` + `resumable`），代码按消息年龄单向降级。
+图片能力新增**引用 / 合并图片入库**、模型可见的 `[图片 #id]` 标注与按需 `view_image` 工具。
+**默认关闭**（图片能力沿用 `vision_enabled` 默认开）；关闭时回复、触发模式、proactive
+与 0.2.0 完全一致。
 
 ### Added
 
 - **自主加入（join_gate）**：群聊未 @ 文本消息先过闸门，再由一次 LLM 调用产出
-  `join` / `confidence` / `reason` 与 1–8 个话题（`title` / `summary` / `message_ids`）；
-  判定加入后进入原回复管线，解析失败 / 超时 / 非法 JSON 一律 fail-closed。
+  **`action` = `join` / `wait` / `skip`**、`addressed_to`、`confidence` / `reason` 与
+  1–8 个话题（`title` / `summary` / `message_ids`，可选 `type`）；只有 `join` 进入原回复
+  管线，`wait` / `skip` 只写 decision、不回复；解析失败 / 超时 / 非法 `action` 一律 fail-closed。
+- **引用机器人识别**：入站的 `ref_msg_idx` 与本地 `messages.quote_index` 比对（只认本群、
+  assistant 消息），命中即 `AtBot` / `ReplyToBot`，与 @ 一样**跳过 join gate**；
+  查询 1s 超时，失败只记 DEBUG、按未命中处理（fail-open，不影响回复）。
+- **`wait` 重试**：上次模型判定为 `wait` 且距那次评估满 `join_gate_wait_retry_seconds`（默认 30s）
+  时，该群**下一条新消息**可绕过评估冷却提前重评估；不排定时器、不凭空产生模型调用，
+  仍受每小时 / 每天加入上限与最小加入间隔约束。
 - **硬闸门**：消息长度 ≥2 rune、评估冷却（默认 60s）、每小时 / 每天加入上限（3 / 12）、
   最小加入间隔（5 分钟）、置信度下限（0.7）；超限不调模型，但仍写 decision。
 - **话题背景**：最近一次话题缓存（每群一行）在 15 分钟内、以 ≤400 字作为回复背景注入，
   放在 affect 块之后；不要求模型强行转回话题。
-- **后台页**：新路由 `/join`（侧栏「自主加入」）—— 启用与 9 个参数、群选择、
-  最近决策列表、最新话题面板、一键启用 / 停用与成本提示。
+- **后台页**：新路由 `/join`（侧栏「自主加入」）—— 启用与 10 个参数、按群名选群、
+  最近决策列表（插话 / 等一等 / 不插话）、最新话题面板、一键启用 / 停用与成本提示。
+- **全站下拉**：新增 `SelectMenu`（按钮 + popover、键盘 Arrow / Enter / Escape、点击外部关闭、
+  aria），替换管理后台所有原生 `<select>`；策略页按群覆盖改为「每群一张卡」的 2–3 列 grid
+  （窄屏单列 + 搜索框），不再横向滚动。
 - **设置**：`join_gate_enabled`（false）、`join_gate_mode`（`llm`）、`join_gate_model`（空）、
   `join_gate_window`（20）、`join_gate_confidence`（0.7）、`join_gate_eval_cooldown_seconds`（60）、
-  `join_gate_min_interval_minutes`（5）、`join_gate_max_per_hour`（3）、
-  `join_gate_max_per_day`（12）；`group_overrides[]` 新增 `join_gate`。
-- **API**：`GET /api/join/decisions`、`GET /api/join/topics`；`GET /api/status` 新增 5 个计数器
-  （`join_gate_evals` / `join_gate_joins` / `join_gate_skips` / `join_gate_errors` /
-  `join_gate_topics`）。
-- **存储**：SQLite 迁移 `0014_join_gate`；PostgreSQL `pgSchema` 新增 `join_decisions` /
-  `join_topics` 两表与索引；会话删除 / 清空级联清理 decisions。
+  `join_gate_wait_retry_seconds`（30）、`join_gate_min_interval_minutes`（5）、
+  `join_gate_max_per_hour`（3）、`join_gate_max_per_day`（12）；
+  `group_overrides[]` 新增 `join_gate`。
+- **API**：`GET /api/join/decisions`（决策新增 `action` 字段）、`GET /api/join/topics`、
+  `GET /api/groups/names?openids=a,b,c`（≤100，未知群返回空串）；
+  `GET /api/status` 新增 6 个计数器（`join_gate_evals` / `join_gate_joins` /
+  `join_gate_skips` / `join_gate_waits` / `join_gate_errors` / `join_gate_topics`）。
+- **存储**：SQLite 迁移 `0014_join_gate`（`join_decisions` 含 `action` 列，老库自动补列；
+  补 `idx_messages_quote_index`）；PostgreSQL `pgSchema` 新增 `join_decisions` /
+  `join_topics` 两表、`action` 列与索引；会话删除 / 清空级联清理 decisions。
 - **文档**：新增 [docs/JOIN-GATE.md](docs/JOIN-GATE.md)；README 增加 §5.17；
-  ADMIN-API 升到 v1.9（§6.8）；DECISIONS 增加 D-048；AGENTS 增加第 21 条。
+  ADMIN-API 升到 v1.9（§6.8 + §5 群名端点）；DECISIONS 增加 D-048（含 v2 取舍）；
+  AGENTS 增加第 21 条（引用识别与三分类）。
 
 ### Changed
 
-- `GET /api/status` 的 `counters` 由 **24 项变为 29 项**（新增 join_gate 5 项；既有字段不变）。
+- `GET /api/status` 的 `counters` 由 **24 项变为 30 项**（新增 join_gate 6 项；既有字段不变）。
+- `GET /api/join/decisions` 的每条 decision 新增 `action`（`join` / `wait` / `skip`）；
+  `joined` 保留并由 `action=="join"` 派生，历史行 `action=""` 按 `joined` 回退。
 - `GET /api/config` 的 `editable`、`PUT /api/config` 与 `/api/policies` 的按群覆盖
-  接受 join_gate 键；配置键 golden 需同步。
+  接受 join_gate 键；配置键 golden 需同步（新增 `join_gate_wait_retry_seconds`）。
 - `GET /api/policies` 的 `group_overrides[]` 增加 `join_gate`（`bool | null`）；
-  全局 `join_gate_enabled` 是总开关，群覆盖只能进一步关闭。
-- 后台导航新增「自主加入」（`/join`）；前端需同步 `web/dist` 产物。
+  全局 `join_gate_enabled` 是总开关，群覆盖只能进一步关闭或显式开启，不能越过全局关。
+- 后台导航新增「自主加入」（`/join`）；策略与加入页改用 `SelectMenu` 与群名卡片；
+  前端需同步 `web/dist` 产物。
 
 ### Security
 
 - join_gate **默认关闭**；全局 `join_gate_enabled` 是总开关，群覆盖不能越过全局关。
 - **只处理群聊**：私聊、命令、空消息、机器人自己的消息、其他机器人的普通发言都不评估；
   join_gate 排在 trigger gate 之前：开启后 `at_only` 下被判定加入的未 @ 消息也会回复，
-  关闭时行为不变；`@` 消息永远跳过 join_gate。
-- **fail-closed**：解析失败 / 超时 / 非法 JSON / 并发额度拿不到时一律不加入，
-  失败不能让一条本可回复的消息失败。
+  关闭时行为不变；`@` 消息与**引用机器人**的消息永远跳过 join_gate。
+- **引用识别 fail-open、join gate fail-closed**：前者 1s 超时、失败只 DEBUG、按未命中处理，
+  绝不拖慢或中断回复；后者解析失败 / 超时 / 非法 JSON / 非法 `action` / 并发额度拿不到时
+  一律不加入，失败不能让一条本可回复的消息失败。
+- **`wait` 不是定时器**：只为「话题还在发展」提供出口，重评估必须由该群的新消息触发，
+  不会在安静的群里凭空调用模型。
 - decision 里的消息预览 **≤80 字**，日志不记消息全文；不把系统提示词交给模型，
-  模型只输出 JSON，不生成回复。
+  模型只输出 JSON，不生成回复。`addressed_to` 只进提示词与 INFO 日志（加入成功时），不落新列。
+- 群名端点只读本地 `conversations.group_name`，不调平台、不新增存储；未知群返回空串。
 - 不做用户画像、不写记忆、不跨群聚合；不做骚扰 / 广告 / 引流；
   频率是硬闸门（评估冷却、每小时 / 每天上限、最小间隔、置信度）。
 - 不做向量聚类、不建 embedding / 向量库，没有规则版判定。
