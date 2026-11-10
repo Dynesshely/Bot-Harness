@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import CopyButton from '@/components/CopyButton.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import ToggleField from '@/components/ToggleField.vue'
-import { policiesApi, toMessage } from '@/api'
+import { groupsApi, policiesApi, toMessage } from '@/api'
 import type { ContextMode, ContextScope, GroupOverride, Policies, TriggerMode } from '@/api/types'
 import { toast } from '@/composables/useToast'
 import {
@@ -73,6 +74,195 @@ const draft = reactive({
   group_overrides: [] as GroupOverride[],
 })
 
+/* ------------------------------------------------------------------ *
+ * 群名与搜索
+ * ------------------------------------------------------------------ */
+
+/** openid → 群名；查不到的键就是没有名字，渲染时回退 openid。 */
+const groupNames = ref<Record<string, string>>({})
+const namesLoading = ref(false)
+const search = ref('')
+let namesTimer: number | null = null
+let namesController: AbortController | null = null
+
+/** 群卡片 + 群白名单里出现的 openid（去重、排序）。 */
+const knownGroupOpenids = computed(() => {
+  const ids = new Set<string>()
+  for (const row of draft.group_overrides) {
+    const id = row.group_openid.trim()
+    if (id) ids.add(id)
+  }
+  for (const id of parseList(draft.group_allowlist)) {
+    if (id) ids.add(id)
+  }
+  // openid 是 ASCII，用普通比较即可（localeCompare 会撞上隐私扫描的 *.local 规则）。
+  return Array.from(ids).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+})
+
+/** 上一次请求过的 openid 集合：值没变就不重复拉（保存/编辑群号不会刷接口）。 */
+let lastRequestedKey = ''
+
+/**
+ * 批量拉群名。后端单次最多 100 个 openid，失败只是没有名字 —— 页面照样可用。
+ * 后端接口还没上时（404 / 501）同样静默回退，不弹错。
+ * force = true 用于「重新加载」，忽略去重。
+ */
+async function loadGroupNames(force = false) {
+  const openids = knownGroupOpenids.value
+  if (openids.length === 0) {
+    groupNames.value = {}
+    lastRequestedKey = ''
+    return
+  }
+  const key = openids.join(',')
+  if (!force && key === lastRequestedKey) return
+  lastRequestedKey = key
+  namesController?.abort()
+  const current = new AbortController()
+  namesController = current
+  namesLoading.value = true
+  try {
+    // 后端单次最多 100 个 openid：分批取，覆盖上千个群也不会只剩前 100 个有名字。
+    const merged: Record<string, string> = {}
+    for (let start = 0; start < openids.length; start += 100) {
+      const batch = openids.slice(start, start + 100)
+      const names = await groupsApi.names(batch, current.signal)
+      Object.assign(merged, names)
+      if (current.signal.aborted) return
+    }
+    groupNames.value = { ...groupNames.value, ...merged }
+  } catch {
+    // 静默：群名只是展示优化，失败就继续显示 openid。
+  } finally {
+    if (namesController === current) {
+      namesController = null
+      namesLoading.value = false
+    }
+  }
+}
+
+/** openid 变化（新增覆盖、改白名单）后重新拉名字，去抖避免每敲一个字就发请求。 */
+function scheduleLoadNames() {
+  if (namesTimer !== null) window.clearTimeout(namesTimer)
+  namesTimer = window.setTimeout(() => void loadGroupNames(), 320)
+}
+
+watch(knownGroupOpenids, () => scheduleLoadNames(), { immediate: true })
+
+onBeforeUnmount(() => {
+  if (namesTimer !== null) window.clearTimeout(namesTimer)
+  namesController?.abort()
+})
+
+function groupName(openid: string): string {
+  return groupNames.value[openid] ?? ''
+}
+
+function groupTitle(openid: string): string {
+  const name = groupName(openid)
+  const id = openid.trim()
+  if (!id) return '未填写群 OpenID'
+  if (!name) return id
+  return `${name} (${id.slice(0, 8)}…)`
+}
+
+const searchTerm = computed(() => search.value.trim().toLowerCase())
+
+/** 卡片列表：编号保持草稿里的下标（保存/删除都用原下标）。 */
+const overrideCards = computed(() =>
+  draft.group_overrides
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => {
+      const term = searchTerm.value
+      if (!term) return true
+      const id = row.group_openid.trim()
+      const name = groupName(id)
+      return id.toLowerCase().includes(term) || name.toLowerCase().includes(term)
+    }),
+)
+
+/* ------------------------------------------------------------------ *
+ * 覆盖字段的下拉选项
+ * ------------------------------------------------------------------ */
+
+const FOLLOW_GLOBAL = { value: '', label: '跟随全局' }
+
+const ENABLED_OPTIONS = [
+  { value: '', label: '跟随默认（启用）' },
+  { value: 'true', label: '启用' },
+  { value: 'false', label: '暂停' },
+]
+
+const TRIGGER_OVERRIDE_OPTIONS = [
+  FOLLOW_GLOBAL,
+  { value: 'at_only', label: '仅 @机器人' },
+  { value: 'all_messages', label: '群内任意消息' },
+]
+
+const CONTEXT_OVERRIDE_OPTIONS = [
+  FOLLOW_GLOBAL,
+  { value: 'per_member', label: '每人独立' },
+  { value: 'shared', label: '整群共享' },
+]
+
+const SCOPE_OVERRIDE_OPTIONS = [
+  FOLLOW_GLOBAL,
+  { value: 'addressed_only', label: '仅 @ 对话' },
+  { value: 'include_unaddressed', label: '含未 @ 消息' },
+]
+
+const BOOL_OPTIONS = [
+  FOLLOW_GLOBAL,
+  { value: 'true', label: '开启' },
+  { value: 'false', label: '关闭' },
+]
+
+const PROACTIVE_OPTIONS = [
+  FOLLOW_GLOBAL,
+  { value: 'off', label: '关闭' },
+  { value: 'auto', label: '自动' },
+]
+
+const HUMANIZE_OPTIONS = [
+  FOLLOW_GLOBAL,
+  { value: 'off', label: 'off' },
+  { value: 'soft', label: 'soft' },
+  { value: 'medium', label: 'medium' },
+  { value: 'strong', label: 'strong' },
+]
+
+const INJECT_MODE_OPTIONS = [
+  FOLLOW_GLOBAL,
+  { value: 'off', label: 'off' },
+  { value: 'line', label: 'line' },
+  { value: 'full', label: 'full' },
+]
+
+const REPLY_TO_BOTS_OPTIONS = [
+  FOLLOW_GLOBAL,
+  { value: 'true', label: '回复其它 bot' },
+  { value: 'false', label: '不回复 bot' },
+]
+
+const QUOTE_REPLY_OPTIONS = [
+  FOLLOW_GLOBAL,
+  { value: 'true', label: '引用回复' },
+  { value: 'false', label: '不引用' },
+]
+
+/** 卡片头的启用徽章：null = 跟随默认（启用），false = 该群暂停。 */
+function overrideEnabledBadge(row: GroupOverride): BadgeInfo {
+  if (row.enabled === false) return { label: '已暂停', tone: 'amber' }
+  if (row.enabled === true) return { label: '已启用', tone: 'emerald' }
+  return { label: '跟随默认 · 启用', tone: 'sky' }
+}
+
+/** 三态布尔覆盖的当前值（null → ''，其余转成 'true' / 'false'）。 */
+function boolValue(row: GroupOverride, key: OverrideBoolKey): string {
+  const value = row[key]
+  return value === null || value === undefined ? '' : String(value)
+}
+
 function parseList(text: string): string[] {
   return Array.from(
     new Set(
@@ -112,6 +302,8 @@ async function load() {
     const data = await policiesApi.get()
     original.value = data
     syncFrom(data)
+    // 群名与策略数据一起刷新（watch 会去抖，首次直接拉一次更快出名字）。
+    void loadGroupNames(true)
   } catch (err) {
     error.value = toMessage(err)
   } finally {
@@ -143,7 +335,7 @@ const patch = computed<Partial<Policies>>(() => {
 
   if (JSON.stringify(draft.group_overrides) !== JSON.stringify(source.group_overrides ?? [])) {
     // 透传式重建：只 trim 群号 + 可空枚举补 null，其余字段（含 D-035 的七项能力覆盖）
-    // 原样带上。之前按白名单重建，改任意一行就会静默抹掉这些字段。
+    // 原样带上。之前按白名单重建，改任意一张卡片就会静默抹掉这些字段。
     changed.group_overrides = toGroupOverridePayload(draft.group_overrides)
   }
   return changed
@@ -184,7 +376,7 @@ const platformBadge = computed<BadgeInfo>(() => {
 async function save() {
   if (!dirty.value || saving.value) return
   if (emptyOverride.value) {
-    toast.error('按群覆盖中存在未填写 group_openid 的行')
+    toast.error('按群覆盖中存在未填写 group_openid 的群卡片')
     return
   }
   saving.value = true
@@ -220,6 +412,8 @@ function addOverride() {
     join_gate: null,
     rate_limit_group_qpm: null,
   })
+  // 新卡片是空的 openid；清掉搜索，否则它可能被过滤掉、看起来像「点了没反应」。
+  search.value = ''
 }
 
 function removeOverride(index: number) {
@@ -500,7 +694,7 @@ function setOverrideQpm(row: GroupOverride, value: string) {
           hint="开启后，回复会以「引用」的形式挂在触发消息下面，上下文一目了然；即时回复（占位语）始终不引用。"
         />
         <ul class="space-y-1 text-xs text-slate-400">
-          <li>· 这是全局默认值；每个群可以在「会话详情」里单独开关，覆盖表里也能改。</li>
+          <li>· 这是全局默认值；每个群可以在「会话详情」里单独开关，下面的群卡片里也能改。</li>
           <li>· 主动消息（含后台手动发送）同样支持引用。</li>
           <li>· 升级前写入的老消息没有平台引用索引，无法被引用。</li>
         </ul>
@@ -595,20 +789,39 @@ function setOverrideQpm(row: GroupOverride, value: string) {
       </div>
     </section>
 
-    <!-- 按群覆盖 -->
+    <!-- 按群覆盖：每群一张卡片，字段全部平铺在卡片内 -->
     <section class="card">
       <div class="card-header">
         <h2 class="card-title">
           <AppIcon name="list" :size="16" class="text-sky-400" />
           按群覆盖 group_overrides
+          <span class="text-xs font-normal text-slate-500">
+            {{ draft.group_overrides.length }} 个群
+          </span>
         </h2>
-        <button type="button" class="btn btn-sm" @click="addOverride">
-          <AppIcon name="plus" :size="14" />
-          新增覆盖
-        </button>
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="relative">
+            <AppIcon
+              name="search"
+              :size="13"
+              class="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-slate-500"
+            />
+            <input
+              v-model="search"
+              class="input w-56 py-1 pl-7 text-xs"
+              type="search"
+              placeholder="搜索群名 / 群 OpenID"
+              aria-label="搜索按群覆盖"
+            />
+          </div>
+          <button type="button" class="btn btn-sm" @click="addOverride">
+            <AppIcon name="plus" :size="14" />
+            新增覆盖
+          </button>
+        </div>
       </div>
 
-      <div class="card-body">
+      <div class="card-body space-y-3">
         <p
           v-if="draft.group_overrides.length === 0"
           class="rounded-lg border border-dashed border-slate-800 px-4 py-8 text-center text-sm text-slate-500"
@@ -616,258 +829,197 @@ function setOverrideQpm(row: GroupOverride, value: string) {
           暂无按群覆盖，所有群使用全局策略。
         </p>
 
-        <div v-else class="table-wrap">
-          <table class="table-base">
-            <thead>
-              <tr>
-                <th class="th min-w-[16rem]">group_openid</th>
-                <th class="th">启用</th>
-                <th class="th min-w-[10rem]">触发模式</th>
-                <th class="th min-w-[10rem]">上下文模式</th>
-                <th class="th min-w-[10rem]">上下文范围</th>
-                <th class="th min-w-[8rem]">工具 tools</th>
-                <th class="th min-w-[8rem]">主动 proactive</th>
-                <th class="th min-w-[8rem]">自主加入 join_gate</th>
-                <th class="th min-w-[8rem]">定时 tasks</th>
-                <th class="th min-w-[8rem]">记忆 memory</th>
-                <th class="th min-w-[8rem]">人味 humanize</th>
-                <th class="th min-w-[8rem]">联网 web</th>
-                <th class="th min-w-[8rem]">执行 exec</th>
-                <th class="th min-w-[8rem]">情绪 affect</th>
-                <th class="th min-w-[9rem]">注入档位 affect_inject_mode</th>
-                <th class="th min-w-[8rem]">润色 polish</th>
-                <th class="th min-w-[9rem]">机器人共存</th>
-                <th class="th min-w-[9rem]">引用回复</th>
-                <th class="th min-w-[9rem]">群 QPM 限流</th>
-                <th class="th text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, index) in draft.group_overrides" :key="index" class="row-hover">
-                <td class="td">
-                  <input
-                    v-model="row.group_openid"
-                    class="input mono"
-                    type="text"
-                    placeholder="群 OpenID"
-                    spellcheck="false"
-                    :class="row.group_openid.trim() ? '' : 'border-rose-500/60'"
-                  />
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.enabled === null || row.enabled === undefined ? '' : String(row.enabled)"
-                    @change="setOverrideEnabled(row, ($event.target as HTMLSelectElement).value)"
+        <template v-else>
+          <p
+            v-if="overrideCards.length === 0"
+            class="rounded-lg border border-dashed border-slate-800 px-4 py-6 text-center text-sm text-slate-500"
+          >
+            没有匹配「{{ search }}」的群。
+          </p>
+
+          <article
+            v-for="{ row, index } in overrideCards"
+            :key="index"
+            class="rounded-xl border border-slate-800 bg-slate-950/40 p-3"
+            :class="row.group_openid.trim() ? '' : 'border-rose-500/50'"
+          >
+            <header class="flex flex-wrap items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <StatusBadge :info="overrideEnabledBadge(row)" dot />
+                  <span class="truncate text-sm font-medium text-slate-100">
+                    {{ groupTitle(row.group_openid) }}
+                  </span>
+                  <CopyButton v-if="row.group_openid.trim()" :value="row.group_openid" label="群 OpenID" />
+                  <span
+                    v-if="namesLoading && !groupName(row.group_openid)"
+                    class="text-[11px] text-slate-500"
                   >
-                    <option value="">跟随默认（启用）</option>
-                    <option value="true">启用</option>
-                    <option value="false">暂停</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.trigger_mode ?? ''"
-                    @change="setOverrideTrigger(row, ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="at_only">仅 @机器人</option>
-                    <option value="all_messages">群内任意消息</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.context_mode ?? ''"
-                    @change="setOverrideContext(row, ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="per_member">每人独立</option>
-                    <option value="shared">整群共享</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.context_scope ?? ''"
-                    @change="setOverrideScope(row, ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="addressed_only">仅 @ 对话</option>
-                    <option value="include_unaddressed">含未 @ 消息</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.tools === null || row.tools === undefined ? '' : String(row.tools)"
-                    @change="setOverrideBool(row, 'tools', ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="true">开启</option>
-                    <option value="false">关闭</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.proactive ?? ''"
-                    @change="setOverrideLevel(row, 'proactive', ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="off">关闭</option>
-                    <option value="auto">自动</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.join_gate === null || row.join_gate === undefined ? '' : String(row.join_gate)"
-                    @change="setOverrideBool(row, 'join_gate', ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="true">启用</option>
-                    <option value="false">关闭</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.tasks === null || row.tasks === undefined ? '' : String(row.tasks)"
-                    @change="setOverrideBool(row, 'tasks', ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="true">开启</option>
-                    <option value="false">关闭</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.memory === null || row.memory === undefined ? '' : String(row.memory)"
-                    @change="setOverrideBool(row, 'memory', ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="true">开启</option>
-                    <option value="false">关闭</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.humanize ?? ''"
-                    @change="setOverrideLevel(row, 'humanize', ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="off">off</option>
-                    <option value="soft">soft</option>
-                    <option value="medium">medium</option>
-                    <option value="strong">strong</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.web === null || row.web === undefined ? '' : String(row.web)"
-                    @change="setOverrideBool(row, 'web', ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="true">开启</option>
-                    <option value="false">关闭</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.exec === null || row.exec === undefined ? '' : String(row.exec)"
-                    @change="setOverrideBool(row, 'exec', ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="true">开启</option>
-                    <option value="false">关闭</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.affect === null || row.affect === undefined ? '' : String(row.affect)"
-                    @change="setOverrideBool(row, 'affect', ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="true">开启</option>
-                    <option value="false">关闭</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.affect_inject_mode ?? ''"
-                    @change="setOverrideLevel(row, 'affect_inject_mode', ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="off">off</option>
-                    <option value="line">line</option>
-                    <option value="full">full</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.polish === null || row.polish === undefined ? '' : String(row.polish)"
-                    @change="setOverrideBool(row, 'polish', ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="true">开启</option>
-                    <option value="false">关闭</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.reply_to_bots === null || row.reply_to_bots === undefined ? '' : String(row.reply_to_bots)"
-                    @change="setOverrideBool(row, 'reply_to_bots', ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="true">回复其它 bot</option>
-                    <option value="false">不回复 bot</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <select
-                    class="input"
-                    :value="row.quote_reply === null || row.quote_reply === undefined ? '' : String(row.quote_reply)"
-                    @change="setOverrideBool(row, 'quote_reply', ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">跟随全局</option>
-                    <option value="true">引用回复</option>
-                    <option value="false">不引用</option>
-                  </select>
-                </td>
-                <td class="td">
-                  <input
-                    class="input"
-                    type="number"
-                    min="1"
-                    placeholder="未设置"
-                    :value="row.rate_limit_group_qpm ?? ''"
-                    @input="setOverrideQpm(row, ($event.target as HTMLInputElement).value)"
-                  />
-                </td>
-                <td class="td text-right">
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-danger"
-                    title="删除该行"
-                    @click="removeOverride(index)"
-                  >
-                    <AppIcon name="trash" :size="14" />
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                    群名加载中…
+                  </span>
+                </div>
+                <p class="mono mt-0.5 break-all text-xs text-slate-500">
+                  {{ row.group_openid.trim() || '（未填写群 OpenID）' }}
+                </p>
+              </div>
+              <button
+                type="button"
+                class="btn btn-sm btn-danger"
+                title="删除这个群的覆盖"
+                @click="removeOverride(index)"
+              >
+                <AppIcon name="trash" :size="14" />
+                删除
+              </button>
+            </header>
+
+            <!-- 所有覆盖字段：窄屏单列，sm 两列，xl 三列；卡片内不再有横向滚动 -->
+            <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div class="sm:col-span-2 xl:col-span-3">
+                <label class="label">群 OpenID group_openid</label>
+                <input
+                  v-model="row.group_openid"
+                  class="input mono"
+                  type="text"
+                  placeholder="群 OpenID"
+                  spellcheck="false"
+                  :class="row.group_openid.trim() ? '' : 'border-rose-500/60'"
+                />
+              </div>
+
+              <SelectMenu
+                :model-value="String(row.enabled ?? '')"
+                label="启用 enabled"
+                size="sm"
+                :options="ENABLED_OPTIONS"
+                @update:model-value="setOverrideEnabled(row, $event)"
+              />
+              <SelectMenu
+                :model-value="row.trigger_mode ?? ''"
+                label="触发模式 trigger_mode"
+                size="sm"
+                :options="TRIGGER_OVERRIDE_OPTIONS"
+                @update:model-value="setOverrideTrigger(row, $event)"
+              />
+              <SelectMenu
+                :model-value="row.context_mode ?? ''"
+                label="上下文模式 context_mode"
+                size="sm"
+                :options="CONTEXT_OVERRIDE_OPTIONS"
+                @update:model-value="setOverrideContext(row, $event)"
+              />
+              <SelectMenu
+                :model-value="row.context_scope ?? ''"
+                label="上下文范围 context_scope"
+                size="sm"
+                :options="SCOPE_OVERRIDE_OPTIONS"
+                @update:model-value="setOverrideScope(row, $event)"
+              />
+              <SelectMenu
+                :model-value="boolValue(row, 'reply_to_bots')"
+                label="机器人共存 reply_to_bots"
+                size="sm"
+                :options="REPLY_TO_BOTS_OPTIONS"
+                @update:model-value="setOverrideBool(row, 'reply_to_bots', $event)"
+              />
+              <SelectMenu
+                :model-value="boolValue(row, 'quote_reply')"
+                label="引用回复 quote_reply"
+                size="sm"
+                :options="QUOTE_REPLY_OPTIONS"
+                @update:model-value="setOverrideBool(row, 'quote_reply', $event)"
+              />
+              <SelectMenu
+                :model-value="boolValue(row, 'tools')"
+                label="工具 tools"
+                size="sm"
+                :options="BOOL_OPTIONS"
+                @update:model-value="setOverrideBool(row, 'tools', $event)"
+              />
+              <SelectMenu
+                :model-value="boolValue(row, 'memory')"
+                label="记忆 memory"
+                size="sm"
+                :options="BOOL_OPTIONS"
+                @update:model-value="setOverrideBool(row, 'memory', $event)"
+              />
+              <SelectMenu
+                :model-value="boolValue(row, 'web')"
+                label="联网 web"
+                size="sm"
+                :options="BOOL_OPTIONS"
+                @update:model-value="setOverrideBool(row, 'web', $event)"
+              />
+              <SelectMenu
+                :model-value="boolValue(row, 'exec')"
+                label="执行 exec"
+                size="sm"
+                :options="BOOL_OPTIONS"
+                @update:model-value="setOverrideBool(row, 'exec', $event)"
+              />
+              <SelectMenu
+                :model-value="row.humanize ?? ''"
+                label="人味 humanize"
+                size="sm"
+                :options="HUMANIZE_OPTIONS"
+                @update:model-value="setOverrideLevel(row, 'humanize', $event)"
+              />
+              <SelectMenu
+                :model-value="boolValue(row, 'polish')"
+                label="润色 polish"
+                size="sm"
+                :options="BOOL_OPTIONS"
+                @update:model-value="setOverrideBool(row, 'polish', $event)"
+              />
+              <SelectMenu
+                :model-value="boolValue(row, 'tasks')"
+                label="定时 tasks"
+                size="sm"
+                :options="BOOL_OPTIONS"
+                @update:model-value="setOverrideBool(row, 'tasks', $event)"
+              />
+              <SelectMenu
+                :model-value="row.proactive ?? ''"
+                label="主动 proactive"
+                size="sm"
+                :options="PROACTIVE_OPTIONS"
+                @update:model-value="setOverrideLevel(row, 'proactive', $event)"
+              />
+              <SelectMenu
+                :model-value="boolValue(row, 'affect')"
+                label="情绪 affect"
+                size="sm"
+                :options="BOOL_OPTIONS"
+                @update:model-value="setOverrideBool(row, 'affect', $event)"
+              />
+              <SelectMenu
+                :model-value="row.affect_inject_mode ?? ''"
+                label="注入档位 affect_inject_mode"
+                size="sm"
+                :options="INJECT_MODE_OPTIONS"
+                @update:model-value="setOverrideLevel(row, 'affect_inject_mode', $event)"
+              />
+              <SelectMenu
+                :model-value="boolValue(row, 'join_gate')"
+                label="自主加入 join_gate"
+                size="sm"
+                :options="BOOL_OPTIONS"
+                @update:model-value="setOverrideBool(row, 'join_gate', $event)"
+              />
+              <div>
+                <label class="label">群 QPM 限流 rate_limit_group_qpm</label>
+                <input
+                  class="input tabular-nums"
+                  type="number"
+                  min="1"
+                  placeholder="未设置"
+                  :value="row.rate_limit_group_qpm ?? ''"
+                  @input="setOverrideQpm(row, ($event.target as HTMLInputElement).value)"
+                />
+              </div>
+            </div>
+          </article>
+        </template>
       </div>
     </section>
 

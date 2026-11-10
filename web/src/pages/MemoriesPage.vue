@@ -2,16 +2,24 @@
 import { computed, onMounted, ref } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import { memoriesApi, toMessage } from '@/api'
 import type { MemoryItem } from '@/api/types'
 import { toast } from '@/composables/useToast'
 import { formatDateTime } from '@/utils/format'
 
-const SCOPES = [
+const SCOPES: { value: string; label: string }[] = [
   { value: '', label: '全部作用域' },
   { value: 'global', label: '全局（管理员）' },
   { value: 'group', label: '群记忆' },
   { value: 'member', label: '个人记忆' },
+]
+
+/** 写入表单的作用域：必须给出明确作用域，所以没有「全部」这一项。 */
+const DRAFT_SCOPES: { value: string; label: string }[] = [
+  { value: 'group', label: '群记忆' },
+  { value: 'member', label: '个人记忆' },
+  { value: 'global', label: '全局' },
 ]
 
 const scope = ref('')
@@ -96,9 +104,16 @@ function owner(item: MemoryItem) {
           长期记忆
         </h2>
         <div class="flex items-center gap-2">
-          <select v-model="scope" class="input input-sm" @change="load">
-            <option v-for="s in SCOPES" :key="s.value" :value="s.value">{{ s.label }}</option>
-          </select>
+          <div class="w-40">
+            <SelectMenu
+              v-model="scope"
+              size="sm"
+              aria-label="按作用域筛选"
+              placeholder="全部作用域"
+              :options="SCOPES"
+              @change="load"
+            />
+          </div>
           <button type="button" class="btn btn-ghost btn-sm" :disabled="loading" @click="load">
             <AppIcon name="refresh" :size="14" :class="loading ? 'animate-spin' : ''" />
             刷新
@@ -114,11 +129,7 @@ function owner(item: MemoryItem) {
 
         <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-4">
-            <select v-model="draftScope" class="input mono">
-              <option value="group">群记忆</option>
-              <option value="member">个人记忆</option>
-              <option value="global">全局</option>
-            </select>
+            <SelectMenu v-model="draftScope" size="sm" aria-label="写入作用域" :options="DRAFT_SCOPES" />
             <input
               v-if="draftScope === 'group'"
               v-model="draftGroup"

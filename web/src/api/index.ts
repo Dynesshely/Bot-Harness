@@ -273,6 +273,20 @@ export const groupsApi = {
       signal,
     })
   },
+  /**
+   * 批量取群名（GET /api/groups/names?openids=a,b,c）。
+   *
+   * 后端最多接受 100 个 openid，查不到的群不会出现在返回里；
+   * 调用方必须自己兜底成 openid —— 群名只是展示优化，不能让它决定页面能不能用。
+   */
+  names(openids: string[], signal?: AbortSignal): Promise<Record<string, string>> {
+    const unique = Array.from(new Set(openids.map((id) => id.trim()).filter(Boolean)))
+    if (unique.length === 0) return Promise.resolve({})
+    return request<{ names?: Record<string, string> }>('/groups/names', {
+      query: { openids: unique.join(',') },
+      signal,
+    }).then((data) => (data && typeof data.names === 'object' && data.names ? data.names : {}))
+  },
 }
 
 /* ------------------------------------------------------------------ *

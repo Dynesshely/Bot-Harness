@@ -53,7 +53,7 @@ const api = vi.hoisted(() => ({
     testSend: vi.fn(),
   },
   merge: { candidates: vi.fn(), run: vi.fn() },
-  groups: { state: vi.fn() },
+  groups: { state: vi.fn(), names: vi.fn() },
   models: { list: vi.fn() },
   toolCalls: { list: vi.fn() },
   memories: { list: vi.fn(), add: vi.fn(), remove: vi.fn(), forgetGroup: vi.fn() },
@@ -159,6 +159,8 @@ const joinDecisionsFixture = [
     speaker: '小明',
     preview: '有人懂这家店吗？周六想约个饭。',
     joined: true,
+    action: 'join',
+    addressed_to: 'group',
     confidence: 0.82,
     reason: '明确求助且 bot 参与过话题',
     topics: [
@@ -176,6 +178,7 @@ const joinDecisionsFixture = [
     speaker: '小红',
     preview: '哈哈哈哈这也太好笑了',
     joined: false,
+    action: 'skip',
     confidence: 0.18,
     reason: '闲聊，没有插话价值',
     topics: [],
@@ -448,6 +451,8 @@ function resetApiMocks(): void {
   api.conversations.list.mockResolvedValue(conversationsFixture)
   api.conversations.setQuoteReply.mockResolvedValue({ group_openid: 'GROUP_A', quote_reply: true })
   api.merge.candidates.mockResolvedValue({ groups: [] })
+  // 群名只是展示优化：默认查不到名字，页面回退成 openid。
+  api.groups.names.mockResolvedValue({})
   api.config.get.mockResolvedValue(configFixture)
   api.config.update.mockImplementation(async (patch) => ({
     editable: { ...configFixture.editable, ...patch },
@@ -533,20 +538,42 @@ describe('一级页面挂载冒烟', () => {
     wrapper.unmount()
   })
 
-  it('策略配置：白名单与按群覆盖表渲染出来', async () => {
+  it('策略配置：白名单与按群覆盖卡片渲染出来', async () => {
     const wrapper = await mountRoute(PoliciesPage, '/policies')
     const text = wrapper.text()
     expect(text).toContain('群白名单 group_allowlist')
     expect(text).toContain('按群覆盖 group_overrides')
-    // 覆盖行里的群号是 input 的 value（不在 text 里）
+    // 每群一张卡片：群号是卡片里 input 的 value（不在 text 里）
+    const cards = wrapper.findAll('article')
+    expect(cards).toHaveLength(1)
     const groupInput = wrapper
-      .findAll<HTMLInputElement>('tbody input.mono')
+      .findAll<HTMLInputElement>('article input.mono')
       .find((input) => input.element.value === 'GROUP_A')
-    expect(groupInput, '覆盖表没有渲染出 fixture 里的 GROUP_A 行').toBeTruthy()
-    // 新增的七列能力覆盖都在表头里
-    for (const label of ['工具 tools', '主动 proactive', '自主加入 join_gate', '定时 tasks', '记忆 memory', '人味 humanize', '联网 web', '执行 exec', '润色 polish']) {
-      expect(text, '覆盖表缺少列：' + label).toContain(label)
+    expect(groupInput, '覆盖卡片没有渲染出 fixture 里的 GROUP_A 行').toBeTruthy()
+    // 所有覆盖字段的控件都在卡片里（原先的表格列标题变成字段标签）
+    for (const label of [
+      '触发模式 trigger_mode',
+      '上下文模式 context_mode',
+      '上下文范围 context_scope',
+      '机器人共存 reply_to_bots',
+      '引用回复 quote_reply',
+      '工具 tools',
+      '记忆 memory',
+      '联网 web',
+      '执行 exec',
+      '人味 humanize',
+      '润色 polish',
+      '定时 tasks',
+      '主动 proactive',
+      '情绪 affect',
+      '注入档位 affect_inject_mode',
+      '自主加入 join_gate',
+      '群 QPM 限流 rate_limit_group_qpm',
+    ]) {
+      expect(text, '覆盖卡片缺少字段：' + label).toContain(label)
     }
+    // 不再有横向滚动的表格
+    expect(wrapper.find('table').exists()).toBe(false)
     expect(unexpected(consoleErrors)).toEqual([])
     expect(unexpected(consoleWarns)).toEqual([])
     wrapper.unmount()
@@ -569,9 +596,11 @@ describe('一级页面挂载冒烟', () => {
 
   it('消息记录：状态筛选包含「命令」（command）', async () => {
     const wrapper = await mountRoute(MessagesPage, '/messages')
+    // 自定义下拉：选项在展开后的 listbox 里
+    await wrapper.find('#msg-status').trigger('click')
     const command = wrapper
-      .findAll<HTMLOptionElement>('#msg-status option')
-      .find((option) => option.element.value === 'command')
+      .findAll('[role="option"]')
+      .find((option) => option.text().includes('命令'))
     expect(command, '状态筛选缺少 command 选项').toBeTruthy()
     expect(command?.text()).toBe('命令')
     expect(unexpected(consoleErrors)).toEqual([])
@@ -640,13 +669,19 @@ describe('一级页面挂载冒烟', () => {
     expect(text).toContain('闲聊，没有插话价值')
     expect(text).toContain('置信度 82%')
     expect(text).toContain('置信度 18%')
-    expect(text).toContain('加入')
-    expect(text).toContain('跳过')
+    // 三分类展示：join → 插话，skip → 不插话（老数据没有 action 时按 joined 兜底）
+    expect(text).toContain('插话')
+    expect(text).toContain('不插话')
     expect(text).toContain('周末聚餐')
     expect(text).toContain('选择一个群后显示它最近一次话题切分')
 
     // 选一个群后拉取该群话题，标题 / 摘要 / message_ids 都渲染出来。
-    await wrapper.find('#join-group').setValue('GROUP_A')
+    await wrapper.find('#join-group').trigger('click')
+    const groupOption = wrapper
+      .findAll('[role="option"]')
+      .find((option) => option.text().includes('测试群') || option.text().includes('GROUP_A'))
+    expect(groupOption, '群下拉里没有 fixture 的群').toBeTruthy()
+    await groupOption?.trigger('click')
     await flushPromises()
     await flushPromises()
     expect(api.join.topics).toHaveBeenCalledWith('GROUP_A')
@@ -851,9 +886,10 @@ describe('设置页 6 个二级页挂载冒烟', () => {
     // 枚举控件同样落到后端值（回复与人味 → 档位 humanize_level = medium）
     await appRouter.push('/settings/reply')
     await flushPromises()
-    const humanize = wrapper.find<HTMLSelectElement>('#cfg-humanize')
+    const humanize = wrapper.find('#cfg-humanize')
     expect(humanize.exists()).toBe(true)
-    expect(humanize.element.value).toBe('medium')
+    // 自定义下拉：选中项文案直接渲染在触发按钮上
+    expect(humanize.text()).toContain('medium')
     wrapper.unmount()
   })
 

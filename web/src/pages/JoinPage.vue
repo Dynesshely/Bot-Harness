@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import NumberField from '@/components/NumberField.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import TextField from '@/components/TextField.vue'
 import ToggleField from '@/components/ToggleField.vue'
@@ -35,6 +36,129 @@ const MODE_OPTIONS = [
   { value: 'llm', label: 'llm · 交给模型判断' },
   { value: 'off', label: 'off · 只记录，不评估' },
 ]
+
+/** 三分类判定的展示文案：join 插话 / wait 等一等 / skip 不插话。 */
+const ACTION_LABELS: Record<string, string> = {
+  join: '插话',
+  wait: '等一等',
+  skip: '不插话',
+}
+const ACTION_CLASSES: Record<string, string> = {
+  join: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+  wait: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+  skip: 'border-slate-700 bg-slate-800/60 text-slate-400',
+}
+
+/** 话题类型（模型输出，可选；缺省按 other）。 */
+const TOPIC_TYPE_LABELS: Record<string, string> = {
+  help: '求助',
+  chat: '闲聊',
+  question: '提问',
+  plan: '计划',
+  conflict: '冲突',
+  joke: '玩笑',
+  other: '其他',
+}
+
+/**
+ * 话题生命周期（后端会按最后一条消息的时间只降不升）。
+ * 无 status（契约 v2 之前的老数据）按 active 展示，绝不能把空值渲染成空白徽章。
+ */
+const TOPIC_STATUS_LABELS: Record<string, string> = {
+  active: '进行中',
+  dormant: '暂歇',
+  closed: '已结束',
+}
+const TOPIC_STATUS_CLASSES: Record<string, string> = {
+  active: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+  dormant: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+  closed: 'border-slate-600/50 bg-slate-600/10 text-slate-400',
+}
+
+/** 判定的 addressed_to：模型在判断这条消息是冲着谁说的（接口有才展示）。 */
+const ADDRESSED_LABELS: Record<string, string> = {
+  bot: '对机器人',
+  group: '对群里',
+  someone_else: '对别人',
+  unknown: '对象不明',
+}
+const ADDRESSED_CLASSES: Record<string, string> = {
+  bot: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+  group: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
+  someone_else: 'border-slate-700 bg-slate-800/60 text-slate-400',
+  unknown: 'border-slate-700 bg-slate-800/60 text-slate-400',
+}
+
+/**
+ * 决策的 action：契约 v2 之后后端直接返回；
+ * 老数据里只有 joined（没有 action 列），按 joined 兜底成 join / skip。
+ */
+function decisionAction(decision: JoinDecisionItem): string {
+  const action = (decision.action ?? '').trim()
+  if (action === 'join' || action === 'wait' || action === 'skip') return action
+  return decision.joined ? 'join' : 'skip'
+}
+
+function actionLabel(action: string): string {
+  return ACTION_LABELS[action] ?? action
+}
+
+function actionClass(action: string): string {
+  return ACTION_CLASSES[action] ?? ACTION_CLASSES.skip
+}
+
+function topicTypeLabel(type?: string | null): string {
+  if (!type) return '其他'
+  return TOPIC_TYPE_LABELS[type] ?? type
+}
+
+/** 归一化话题状态：空值 / 老数据 / 未知值都按 active（后端解析时也这样兜底）。 */
+function topicStatus(topic: JoinGateTopic): 'active' | 'dormant' | 'closed' {
+  const raw = (topic.status ?? '').trim().toLowerCase()
+  if (raw === 'dormant' || raw === 'closed') return raw
+  return 'active'
+}
+
+function topicStatusLabel(status: string): string {
+  return TOPIC_STATUS_LABELS[status] ?? TOPIC_STATUS_LABELS.active
+}
+
+function topicStatusClass(status: string): string {
+  return TOPIC_STATUS_CLASSES[status] ?? TOPIC_STATUS_CLASSES.active
+}
+
+/**
+ * resumable 标记：只有 dormant 需要明确「能不能被新消息接回」。
+ * closed 永远不可接回（后端强制），用「不要提」表达；active 不需要标记。
+ */
+function topicResumableMark(topic: JoinGateTopic): string {
+  switch (topicStatus(topic)) {
+    case 'dormant':
+      return topic.resumable ? '可接回' : '不可接回'
+    case 'closed':
+      return '不要提'
+    default:
+      return ''
+  }
+}
+
+/** 话题的一句话状态：暂歇，可接回 / 已结束，不要提。 */
+function topicStatusSummary(topic: JoinGateTopic): string {
+  const label = topicStatusLabel(topicStatus(topic))
+  const mark = topicResumableMark(topic)
+  return mark ? `${label}，${mark}` : label
+}
+
+function addressedToLabel(value?: string | null): string {
+  const raw = (value ?? '').trim()
+  if (!raw) return ''
+  return ADDRESSED_LABELS[raw] ?? raw
+}
+
+function addressedToClass(value?: string | null): string {
+  const raw = (value ?? '').trim()
+  return ADDRESSED_CLASSES[raw] ?? ADDRESSED_CLASSES.unknown
+}
 
 /* ------------------------------------------------------------------ *
  * 配置（PUT /api/config）
@@ -172,6 +296,16 @@ const selectedGroupLabel = computed(() => {
   return found?.name ? `${found.name}（${shortId(openid, 8, 6)}）` : shortId(openid, 8, 6)
 })
 
+/** 群下拉的选项：空值 = 不筛选，其余按 group_openid 去重。 */
+const groupSelectOptions = computed(() => [
+  { value: '', label: '全部群（不筛选）' },
+  ...groupOptions.value.map((group) => ({
+    value: group.openid,
+    label: `${group.name || shortId(group.openid, 10, 6)}（${group.conversations} 个会话）`,
+    desc: group.name ? group.openid : undefined,
+  })),
+])
+
 async function loadGroups() {
   conversationsLoading.value = true
   conversationsError.value = ''
@@ -196,6 +330,14 @@ const decisionsError = ref('')
 const topicsState = ref<JoinTopicsState | null>(null)
 const topicsLoading = ref(false)
 const topicsError = ref('')
+
+/** 可选布尔字段容错：后端是 bool，JSON 字符串化 / 老数据里可能是 "true" / "false"。 */
+function optionalBool(raw: unknown): boolean | undefined {
+  if (typeof raw === 'boolean') return raw
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  return undefined
+}
 
 function parseTopicList(raw: unknown): JoinGateTopic[] {
   let value = raw
@@ -228,6 +370,11 @@ function parseTopicList(raw: unknown): JoinGateTopic[] {
         title: String(record.title ?? ''),
         summary: String(record.summary ?? ''),
         message_ids: ids,
+        // type / status / resumable 都可选：老数据没有这些字段，渲染时按
+        // other / active / 未标记 兜底，绝不能因为多一个未知枚举丢整条记录。
+        type: record.type ? String(record.type) : undefined,
+        status: record.status ? String(record.status) : undefined,
+        resumable: optionalBool(record.resumable),
       },
     ]
   })
@@ -248,7 +395,13 @@ function confidenceText(value: number): string {
 function decisionTopicsLabel(decision: JoinDecisionItem): string {
   const topics = topicsOf(decision)
   if (topics.length === 0) return ''
-  return topics.map((topic) => topic.title || topic.id).filter(Boolean).join(' · ')
+  return topics
+    .map(
+      (topic) =>
+        `${topic.title || topic.id}（${topicTypeLabel(topic.type)} · ${topicStatusSummary(topic)}）`,
+    )
+    .filter(Boolean)
+    .join(' · ')
 }
 
 async function loadDecisions() {
@@ -344,7 +497,7 @@ onMounted(async () => {
             · 每次评估最多调用一次模型（temperature 0.1、输出只有 JSON、不生成回复）；
             同群有评估冷却，另有每小时 / 每天加入上限。
           </li>
-          <li>· 按群覆盖在「策略配置」的 join_gate 列：全局关时，按群开启不会越过总开关。</li>
+          <li>· 按群覆盖在「策略配置」的群卡片里（join_gate 字段）：全局关时，按群开启不会越过总开关。</li>
         </ul>
         <p v-if="configError" class="flex items-center gap-2 text-xs text-rose-300">
           <AppIcon name="warning" :size="14" />
@@ -371,15 +524,13 @@ onMounted(async () => {
             label="启用 join_gate_enabled"
             hint="全局总开关；关闭后所有群都不再评估（按群覆盖只能进一步收窄）"
           />
-          <div>
-            <label class="label" for="join-mode">模式 join_gate_mode</label>
-            <select id="join-mode" v-model="draft.join_gate_mode" class="input">
-              <option v-for="option in MODE_OPTIONS" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-            <p class="field-hint">off 仍会记录消息，但不调用模型评估</p>
-          </div>
+          <SelectMenu
+            id="join-mode"
+            v-model="draft.join_gate_mode"
+            label="模式 join_gate_mode"
+            :options="MODE_OPTIONS"
+            hint="off 仍会记录消息，但不调用模型评估"
+          />
           <TextField
             v-model="draft.join_gate_model"
             label="评估模型 join_gate_model"
@@ -408,6 +559,27 @@ onMounted(async () => {
             :min="10"
             :max="3600"
             hint="同群两次评估的最小间隔（10–3600，默认 60）"
+          />
+          <NumberField
+            v-model="draft.join_gate_wait_retry_seconds"
+            label="wait 重试 join_gate_wait_retry_seconds（秒）"
+            :min="10"
+            :max="300"
+            hint="上次判定「等一等」时，满这个间隔可由该群的下一条新消息提前重评估（10–300，默认 30）"
+          />
+          <NumberField
+            v-model="draft.join_gate_topic_dormant_minutes"
+            label="话题休眠 join_gate_topic_dormant_minutes（分钟）"
+            :min="5"
+            :max="240"
+            hint="话题超过这么久没有新消息就不再算「进行中」（5–240，默认 20）"
+          />
+          <NumberField
+            v-model="draft.join_gate_topic_closed_minutes"
+            label="话题结束 join_gate_topic_closed_minutes（分钟）"
+            :min="30"
+            :max="1440"
+            hint="话题超过这么久没有新消息算已结束（30–1440，默认 180，必须大于休眠阈值）"
           />
           <NumberField
             v-model="draft.join_gate_min_interval_minutes"
@@ -487,23 +659,16 @@ onMounted(async () => {
       <div class="card-body space-y-3">
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label class="label" for="join-group">从会话中选择群</label>
-            <select
+            <SelectMenu
               id="join-group"
               v-model="selectedGroup"
-              class="input"
+              label="从会话中选择群"
+              placeholder="全部群（不筛选）"
+              :options="groupSelectOptions"
               :disabled="conversationsLoading"
+              :hint="`来自「会话管理」的群会话，按 group_openid 去重；当前：${selectedGroupLabel}`"
               @change="onGroupChange"
-            >
-              <option value="">全部群（不筛选）</option>
-              <option v-for="group in groupOptions" :key="group.openid" :value="group.openid">
-                {{ group.name || shortId(group.openid, 10, 6) }}（{{ group.conversations }} 个会话）
-              </option>
-            </select>
-            <p class="field-hint">
-              来自「会话管理」的群会话，按 group_openid 去重；当前：
-              {{ selectedGroupLabel }}
-            </p>
+            />
           </div>
           <div>
             <label class="label" for="join-manual">或手动输入 group_openid</label>
@@ -561,8 +726,23 @@ onMounted(async () => {
             :key="topic.id || topic.title"
             class="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2"
           >
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
               <span class="text-sm font-medium text-slate-200">{{ topic.title || '（无标题）' }}</span>
+              <span class="badge border-violet-500/40 bg-violet-500/10 text-violet-300">
+                {{ topicTypeLabel(topic.type) }}
+              </span>
+              <span class="badge" :class="topicStatusClass(topicStatus(topic))">
+                {{ topicStatusLabel(topicStatus(topic)) }}
+              </span>
+              <span
+                v-if="topicResumableMark(topic)"
+                class="badge"
+                :class="topicStatus(topic) === 'closed'
+                  ? 'border-slate-700 bg-slate-800/60 text-slate-400'
+                  : 'border-sky-500/40 bg-sky-500/10 text-sky-300'"
+              >
+                {{ topicResumableMark(topic) }}
+              </span>
               <span class="mono ml-auto text-xs text-slate-500">{{ topic.id }}</span>
             </div>
             <p class="mt-1 text-xs text-slate-400">{{ topic.summary || '（无摘要）' }}</p>
@@ -619,17 +799,19 @@ onMounted(async () => {
             class="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2"
           >
             <div class="flex flex-wrap items-center gap-2">
-              <span
-                class="badge"
-                :class="
-                  decision.joined
-                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
-                    : 'border-slate-700 bg-slate-800/60 text-slate-400'
-                "
-              >
-                {{ decision.joined ? '加入' : '跳过' }}
+              <span class="badge" :class="actionClass(decisionAction(decision))">
+                {{ actionLabel(decisionAction(decision)) }}
+                <span class="mono text-[11px] opacity-70">{{ decisionAction(decision) }}</span>
               </span>
               <span class="text-xs text-slate-400">置信度 {{ confidenceText(decision.confidence) }}</span>
+              <span
+                v-if="addressedToLabel(decision.addressed_to)"
+                class="badge"
+                :class="addressedToClass(decision.addressed_to)"
+                :title="`addressed_to: ${decision.addressed_to}`"
+              >
+                {{ addressedToLabel(decision.addressed_to) }}
+              </span>
               <span v-if="decision.speaker" class="text-xs text-slate-500">{{ decision.speaker }}</span>
               <span class="ml-auto text-xs text-slate-500" :title="formatDateTime(decision.created_at)">
                 {{ formatRelative(decision.created_at) }}

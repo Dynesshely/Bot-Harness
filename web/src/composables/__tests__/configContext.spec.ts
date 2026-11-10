@@ -92,6 +92,9 @@ describe('emptyDraft', () => {
     expect(draft.join_gate_window).toBe(20)
     expect(draft.join_gate_confidence).toBe(0.7)
     expect(draft.join_gate_eval_cooldown_seconds).toBe(60)
+    expect(draft.join_gate_wait_retry_seconds).toBe(30)
+    expect(draft.join_gate_topic_dormant_minutes).toBe(20)
+    expect(draft.join_gate_topic_closed_minutes).toBe(180)
     expect(draft.join_gate_min_interval_minutes).toBe(5)
     expect(draft.join_gate_max_per_hour).toBe(3)
     expect(draft.join_gate_max_per_day).toBe(12)
@@ -369,6 +372,9 @@ describe('buildPatch：只提交改动字段', () => {
           join_gate_window: 30,
           join_gate_confidence: 0.82,
           join_gate_eval_cooldown_seconds: 120,
+          join_gate_wait_retry_seconds: 45,
+          join_gate_topic_dormant_minutes: 30,
+          join_gate_topic_closed_minutes: 240,
           join_gate_min_interval_minutes: 10,
           join_gate_max_per_hour: 5,
           join_gate_max_per_day: 20,
@@ -385,6 +391,9 @@ describe('buildPatch：只提交改动字段', () => {
       join_gate_window: 30,
       join_gate_confidence: 0.82,
       join_gate_eval_cooldown_seconds: 120,
+      join_gate_wait_retry_seconds: 45,
+      join_gate_topic_dormant_minutes: 30,
+      join_gate_topic_closed_minutes: 240,
       join_gate_min_interval_minutes: 10,
       join_gate_max_per_hour: 5,
       join_gate_max_per_day: 20,

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import CopyButton from '@/components/CopyButton.vue'
 import { isAbortError, messagesApi, toMessage } from '@/api'
@@ -137,21 +138,23 @@ const activeFilterCount = computed(
         </div>
 
         <div class="w-32">
-          <label class="label" for="msg-direction">方向</label>
-          <select id="msg-direction" v-model="direction" class="input" @change="onFilterChange">
-            <option v-for="item in DIRECTIONS" :key="item.value" :value="item.value">
-              {{ item.label }}
-            </option>
-          </select>
+          <SelectMenu
+            id="msg-direction"
+            v-model="direction"
+            label="方向"
+            :options="DIRECTIONS"
+            @change="onFilterChange"
+          />
         </div>
 
         <div class="w-32">
-          <label class="label" for="msg-status">状态</label>
-          <select id="msg-status" v-model="status" class="input" @change="onFilterChange">
-            <option v-for="item in STATUSES" :key="item.value" :value="item.value">
-              {{ item.label }}
-            </option>
-          </select>
+          <SelectMenu
+            id="msg-status"
+            v-model="status"
+            label="状态"
+            :options="STATUSES"
+            @change="onFilterChange"
+          />
         </div>
 
         <div class="w-52">

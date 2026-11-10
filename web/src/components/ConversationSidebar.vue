@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { conversationsApi, isAbortError, toMessage } from '@/api'
 import type { Conversation, ConversationScene } from '@/api/types'
@@ -153,11 +154,15 @@ function subtitleOf(item: Conversation): string {
           placeholder="搜群名 / 成员 / OpenID"
         />
       </div>
-      <select v-model="scene" class="input w-24 py-1.5 text-xs" title="按场景筛选">
-        <option v-for="item in SCENES" :key="item.value" :value="item.value">
-          {{ item.label }}
-        </option>
-      </select>
+      <div class="w-28 shrink-0">
+        <SelectMenu
+          v-model="scene"
+          size="sm"
+          aria-label="按场景筛选"
+          placeholder="全部场景"
+          :options="SCENES"
+        />
+      </div>
     </div>
 
     <p v-if="error" class="shrink-0 px-3 py-2 text-xs text-rose-300">{{ error }}</p>

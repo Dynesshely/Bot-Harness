@@ -6,6 +6,7 @@ import type { SyncCommandItem } from '@/api/types'
 import { toast } from '@/composables/useToast'
 import AppIcon from '@/components/AppIcon.vue'
 import NumberField from '@/components/NumberField.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import TextField from '@/components/TextField.vue'
 import ToggleField from '@/components/ToggleField.vue'
 
@@ -75,7 +76,10 @@ const TRANSPORTS = [
   { value: 'both', label: 'both（两条通道同时开）' },
 ]
 
-const LOG_LEVELS = ['debug', 'info', 'warn', 'error']
+const LOG_LEVELS = ['debug', 'info', 'warn', 'error'].map((level) => ({
+  value: level,
+  label: level,
+}))
 </script>
 
 <template>
@@ -111,13 +115,13 @@ const LOG_LEVELS = ['debug', 'info', 'warn', 'error']
             <template v-else>尚未配置：机器人无法连接平台。</template>
           </p>
         </div>
-        <div>
-          <label class="label" for="cfg-qq-transport">事件通道 qq_transport</label>
-          <select id="cfg-qq-transport" v-model="draft.qq_transport" class="input mono">
-            <option v-for="t in TRANSPORTS" :key="t.value" :value="t.value">{{ t.label }}</option>
-          </select>
-          <p class="field-hint">切换通道需要重启进程才会重新装配接收端。</p>
-        </div>
+        <SelectMenu
+          id="cfg-qq-transport"
+          v-model="draft.qq_transport"
+          label="事件通道 qq_transport"
+          :options="TRANSPORTS"
+          hint="切换通道需要重启进程才会重新装配接收端。"
+        />
         <ToggleField
           v-model="draft.qq_sandbox"
           label="沙箱环境 qq_sandbox"
@@ -272,13 +276,13 @@ const LOG_LEVELS = ['debug', 'info', 'warn', 'error']
           label="跳过 TLS 校验 tls_insecure_verify"
           hint="仅在不信任 CA 时临时使用，改完需要重启"
         />
-        <div>
-          <label class="label" for="cfg-log-level">日志级别 log_level</label>
-          <select id="cfg-log-level" v-model="draft.log_level" class="input mono">
-            <option v-for="l in LOG_LEVELS" :key="l" :value="l">{{ l }}</option>
-          </select>
-          <p class="field-hint">保存后立即生效，不用重启。</p>
-        </div>
+        <SelectMenu
+          id="cfg-log-level"
+          v-model="draft.log_level"
+          label="日志级别 log_level"
+          :options="LOG_LEVELS"
+          hint="保存后立即生效，不用重启。"
+        />
         <NumberField
           v-model="draft.log_buffer_size"
           label="日志缓冲容量 log_buffer_size"

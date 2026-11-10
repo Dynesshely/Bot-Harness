@@ -102,6 +102,12 @@ export interface EditableDraft {
   join_gate_confidence: number
   /** 同群两次评估最小间隔（秒，10–3600）。 */
   join_gate_eval_cooldown_seconds: number
+  /** 上次判定 wait 时，满这个秒数可由该群的下一条新消息触发提前重评估（10–300）。 */
+  join_gate_wait_retry_seconds: number
+  /** 话题多久没有新消息算「休眠」（分钟，5–240）。 */
+  join_gate_topic_dormant_minutes: number
+  /** 话题多久没有新消息算「已结束」（分钟，30–1440，必须大于休眠阈值）。 */
+  join_gate_topic_closed_minutes: number
   /** 两次加入最小间隔（分钟，1–240）。 */
   join_gate_min_interval_minutes: number
   /** 每小时加入上限（1–30）。 */
@@ -222,6 +228,9 @@ export function emptyDraft(): EditableDraft {
     join_gate_window: 20,
     join_gate_confidence: 0.7,
     join_gate_eval_cooldown_seconds: 60,
+    join_gate_wait_retry_seconds: 30,
+    join_gate_topic_dormant_minutes: 20,
+    join_gate_topic_closed_minutes: 180,
     join_gate_min_interval_minutes: 5,
     join_gate_max_per_hour: 3,
     join_gate_max_per_day: 12,
@@ -307,6 +316,9 @@ export type NumericKey =
   | 'join_gate_window'
   | 'join_gate_confidence'
   | 'join_gate_eval_cooldown_seconds'
+  | 'join_gate_wait_retry_seconds'
+  | 'join_gate_topic_dormant_minutes'
+  | 'join_gate_topic_closed_minutes'
   | 'join_gate_min_interval_minutes'
   | 'join_gate_max_per_hour'
   | 'join_gate_max_per_day'
@@ -443,6 +455,9 @@ export function assign(target: EditableDraft, source: EditableConfig | EditableD
   target.join_gate_window = source.join_gate_window ?? 20
   target.join_gate_confidence = source.join_gate_confidence ?? 0.7
   target.join_gate_eval_cooldown_seconds = source.join_gate_eval_cooldown_seconds ?? 60
+  target.join_gate_wait_retry_seconds = source.join_gate_wait_retry_seconds ?? 30
+  target.join_gate_topic_dormant_minutes = source.join_gate_topic_dormant_minutes ?? 20
+  target.join_gate_topic_closed_minutes = source.join_gate_topic_closed_minutes ?? 180
   target.join_gate_min_interval_minutes = source.join_gate_min_interval_minutes ?? 5
   target.join_gate_max_per_hour = source.join_gate_max_per_hour ?? 3
   target.join_gate_max_per_day = source.join_gate_max_per_day ?? 12
@@ -516,6 +531,9 @@ export const NUMERIC_PATCH_KEYS: readonly NumericKey[] = [
   'join_gate_window',
   'join_gate_confidence',
   'join_gate_eval_cooldown_seconds',
+  'join_gate_wait_retry_seconds',
+  'join_gate_topic_dormant_minutes',
+  'join_gate_topic_closed_minutes',
   'join_gate_min_interval_minutes',
   'join_gate_max_per_hour',
   'join_gate_max_per_day',

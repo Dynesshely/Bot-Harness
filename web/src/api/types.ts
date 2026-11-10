@@ -247,6 +247,12 @@ export interface EditableConfig {
   join_gate_confidence?: number
   /** 同群两次评估的最小间隔（秒，10–3600，默认 60）。 */
   join_gate_eval_cooldown_seconds?: number
+  /** 上次判定 wait 时，满这个秒数可由下一条新消息触发提前重评估（10–300，默认 30）。 */
+  join_gate_wait_retry_seconds?: number
+  /** 话题多少分钟没新消息算休眠（5–240，默认 20）。 */
+  join_gate_topic_dormant_minutes?: number
+  /** 话题多少分钟没新消息算结束（30–1440，默认 180，必须大于休眠阈值）。 */
+  join_gate_topic_closed_minutes?: number
   /** 两次加入之间的最小间隔（分钟，1–240，默认 5）。 */
   join_gate_min_interval_minutes?: number
   /** 每小时最多加入几次（1–30，默认 3）。 */
@@ -797,12 +803,28 @@ export interface QuoteReplyState {
  * 自主加入（join_gate）
  * ------------------------------------------------------------------ */
 
+/** 话题类型（模型输出；缺省 / 未知按 other 展示）。 */
+export type JoinTopicType = 'help' | 'chat' | 'question' | 'plan' | 'conflict' | 'joke' | 'other'
+
+/**
+ * 话题生命周期（模型输出，后端会按时间只降不升）：
+ * active 进行中 / dormant 暂歇 / closed 已结束。
+ * 老数据（契约 v2 之前）没有这个字段，页面按 active 展示。
+ */
+export type JoinTopicStatus = 'active' | 'dormant' | 'closed'
+
 /** 话题里的一条消息（message_ids 对应群消息的本地 id）。 */
 export interface JoinGateTopic {
   id: string
   title: string
   summary: string
   message_ids: number[]
+  /** 话题类型；老数据 / 模型未给时为空。 */
+  type?: JoinTopicType | string
+  /** 话题状态；老数据 / 模型未给时按 active 展示。 */
+  status?: JoinTopicStatus | string
+  /** 这个话题还值不值得被新消息接回（closed 恒为 false，后端解析时已强制）。 */
+  resumable?: boolean
 }
 
 /** 一条加入评估决策（joined=false 也会记录，便于解释「为什么没接」）。 */
@@ -816,6 +838,13 @@ export interface JoinDecisionItem {
   /** 消息预览（后端截断到 80 字）。 */
   preview: string
   joined: boolean
+  /**
+   * 三分类判定：join 插话 / wait 等一等 / skip 不插话。
+   * 契约 v2 之后后端才返回；老库里没有该列时为空，前端按 joined 兜底。
+   */
+  action?: 'join' | 'wait' | 'skip' | string
+  /** 模型判断这条消息是冲着谁说的（bot / group / someone_else / unknown）。 */
+  addressed_to?: string
   confidence: number
   reason: string
   /**

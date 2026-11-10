@@ -4,6 +4,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import NumberField from '@/components/NumberField.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { affectApi, configApi, toMessage } from '@/api'
 import type {
@@ -189,6 +190,15 @@ const packOptions = computed(() => {
 
 const currentPack = computed(
   () => packs.value.find((pack) => pack.id === draft.affect_pack) ?? packOptions.value[0],
+)
+
+/** 内容包下拉：名称 + id 一行，说明放 desc（原生 option 放不下这些）。 */
+const packSelectOptions = computed(() =>
+  packOptions.value.map((pack) => ({
+    value: pack.id,
+    label: `${pack.name}（${pack.id}）`,
+    desc: pack.description,
+  })),
 )
 
 function packName(id?: string | null): string {
@@ -508,6 +518,15 @@ function conversationLabel(item: AffectConversation): string {
   return `${short} · ${pack} · ${formatRelative(item.updated_at)}`
 }
 
+/** 会话下拉：label 是短 id + 内容包，desc 是完整 id 与更新时间。 */
+const conversationOptions = computed(() =>
+  conversations.value.map((item) => ({
+    value: item.id,
+    label: conversationLabel(item),
+    desc: `${item.id} · ${formatShortDateTime(item.updated_at)}`,
+  })),
+)
+
 /* ------------------------------------------------------------------ *
  * 历史 SVG 折线
  * ------------------------------------------------------------------ */
@@ -626,35 +645,28 @@ const chartData = computed(() => {
       </div>
       <div class="card-body space-y-4">
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <div>
-            <label class="label" for="affect-pack">内容包 affect_pack</label>
-            <select id="affect-pack" v-model="draft.affect_pack" class="input" :disabled="packsLoading">
-              <option v-for="pack in packOptions" :key="pack.id" :value="pack.id">
-                {{ pack.name }}（{{ pack.id }}）
-              </option>
-            </select>
-            <p class="field-hint">
-              {{ currentPack?.description || '内置内容包；默认「日常心境」' }}
-            </p>
-          </div>
-          <div>
-            <label class="label" for="affect-inject-mode">注入档位 affect_inject_mode</label>
-            <select id="affect-inject-mode" v-model="draft.affect_inject_mode" class="input">
-              <option v-for="mode in INJECT_MODES" :key="mode.value" :value="mode.value">
-                {{ mode.label }}
-              </option>
-            </select>
-            <p class="field-hint">off 不注入 / line 一行 / full 多段；token 上限见右侧</p>
-          </div>
-          <div>
-            <label class="label" for="affect-classifier">事件分类器 affect_event_classifier</label>
-            <select id="affect-classifier" v-model="draft.affect_event_classifier" class="input">
-              <option v-for="item in CLASSIFIERS" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </option>
-            </select>
-            <p class="field-hint">rules 按内容包正则匹配；off 时只维护数值不识别事件</p>
-          </div>
+          <SelectMenu
+            id="affect-pack"
+            v-model="draft.affect_pack"
+            label="内容包 affect_pack"
+            :options="packSelectOptions"
+            :disabled="packsLoading"
+            :hint="currentPack?.description || '内置内容包；默认「日常心境」'"
+          />
+          <SelectMenu
+            id="affect-inject-mode"
+            v-model="draft.affect_inject_mode"
+            label="注入档位 affect_inject_mode"
+            :options="INJECT_MODES"
+            hint="off 不注入 / line 一行 / full 多段；token 上限见右侧"
+          />
+          <SelectMenu
+            id="affect-classifier"
+            v-model="draft.affect_event_classifier"
+            label="事件分类器 affect_event_classifier"
+            :options="CLASSIFIERS"
+            hint="rules 按内容包正则匹配；off 时只维护数值不识别事件"
+          />
           <NumberField
             v-model="draft.affect_tick_seconds"
             label="tick 间隔 affect_tick_seconds（秒）"
@@ -700,12 +712,15 @@ const chartData = computed(() => {
           会话
         </h2>
         <div class="flex flex-wrap items-center gap-2">
-          <select v-model="selected" class="input min-w-[18rem]" :disabled="conversationsLoading || conversations.length === 0">
-            <option value="">请选择会话</option>
-            <option v-for="item in conversations" :key="item.id" :value="item.id">
-              {{ conversationLabel(item) }}
-            </option>
-          </select>
+          <SelectMenu
+            v-model="selected"
+            class="min-w-[18rem]"
+            size="sm"
+            placeholder="请选择会话"
+            aria-label="选择会话"
+            :options="conversationOptions"
+            :disabled="conversationsLoading || conversations.length === 0"
+          />
           <button type="button" class="btn btn-sm" :disabled="conversationsLoading" @click="loadConversations">
             <AppIcon name="refresh" :size="14" :class="conversationsLoading ? 'animate-spin' : ''" />
             刷新

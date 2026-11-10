@@ -2,8 +2,15 @@
 import { useConfig } from '@/composables/configContext'
 import AppIcon from '@/components/AppIcon.vue'
 import NumberField from '@/components/NumberField.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import TextField from '@/components/TextField.vue'
 import ToggleField from '@/components/ToggleField.vue'
+
+/** 搜索后端：空串 = 不启用搜索（与后端的空值语义一致）。 */
+const SEARCH_PROVIDERS = [
+  { value: '', label: '（不启用搜索）' },
+  { value: 'searxng', label: 'searxng' },
+]
 
 const { draft } = useConfig()
 </script>
@@ -62,14 +69,13 @@ const { draft } = useConfig()
             </div>
           </div>
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <div>
-              <label class="label" for="cfg-search-provider">搜索后端 web_search_provider</label>
-              <select id="cfg-search-provider" v-model="draft.web_search_provider" class="input mono">
-                <option value="">（不启用搜索）</option>
-                <option value="searxng">searxng</option>
-              </select>
-              <p class="field-hint">只影响 web_search；web_fetch 只依赖「联网」开关。</p>
-            </div>
+            <SelectMenu
+              id="cfg-search-provider"
+              v-model="draft.web_search_provider"
+              label="搜索后端 web_search_provider"
+              :options="SEARCH_PROVIDERS"
+              hint="只影响 web_search；web_fetch 只依赖「联网」开关。"
+            />
             <div class="sm:col-span-2">
               <label class="label" for="cfg-search-url">搜索服务地址 web_search_base_url</label>
               <input

@@ -1,10 +1,37 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { MODEL_PARAM_KEYS, useConfig } from '@/composables/configContext'
 import ModalDialog from '@/components/ModalDialog.vue'
 import NumberField from '@/components/NumberField.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import ToggleField from '@/components/ToggleField.vue'
 
 const { draft, loaded, saving, apiKeySource, modelIds, modelsBaseUrl, modelsFetchedAt, modelsLoading, modelsError, customModel, modelMissingFromList, promptOpen, modelParamsOpen, modelParamsDirtyCount, clearStoredKey, loadModels } = useConfig()
+
+/**
+ * 模型下拉的选项。
+ *
+ * 原生 select 时代靠「额外的 option」兜住两种边界：还没拉列表、当前模型不在列表里。
+ * 换成自定义下拉后同样要把它们做成选项，否则选中的值会显示成空白。
+ */
+const modelSelectOptions = computed(() => {
+  const current = draft.model
+  const ids = modelIds
+  const options: { value: string; label: string; desc?: string }[] = []
+  if (current && !ids.includes(current)) {
+    options.push({ value: current, label: current, desc: '不在上游返回的列表里' })
+  }
+  if (ids.length === 0) {
+    if (!options.some((option) => option.value === current)) {
+      options.push({ value: current, label: current || '（先刷新模型列表）' })
+    }
+    return options
+  }
+  for (const id of ids) {
+    options.push({ value: id, label: id, desc: id === current ? '当前使用' : undefined })
+  }
+  return options
+})
 </script>
 
 <template>
@@ -92,18 +119,15 @@ const { draft, loaded, saving, apiKeySource, modelIds, modelsBaseUrl, modelsFetc
             <div class="sm:col-span-2 xl:col-span-3">
               <label class="label" for="cfg-model">模型 model</label>
               <div class="flex flex-wrap items-center gap-2">
-                <select
+                <SelectMenu
                   v-if="!customModel"
                   id="cfg-model"
                   v-model="draft.model"
-                  class="input mono min-w-56 flex-1"
-                >
-                  <option v-if="!modelIds.length" :value="draft.model">{{ draft.model || '（先刷新模型列表）' }}</option>
-                  <option v-else-if="modelMissingFromList" :value="draft.model">
-                    {{ draft.model }}（不在列表中）
-                  </option>
-                  <option v-for="id in modelIds" :key="id" :value="id">{{ id }}</option>
-                </select>
+                  class="mono min-w-56 flex-1"
+                  placeholder="（先刷新模型列表）"
+                  aria-label="模型 model"
+                  :options="modelSelectOptions"
+                />
                 <input
                   v-else
                   id="cfg-model"

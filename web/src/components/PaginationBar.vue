@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import AppIcon from './AppIcon.vue'
+import SelectMenu from './SelectMenu.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -16,6 +17,11 @@ const emit = defineEmits<{
   'update:page': [page: number]
   'update:pageSize': [size: number]
 }>()
+
+/** 每页条数下拉的选项（数字 value，SelectMenu 支持 string | number）。 */
+const pageSizeSelectOptions = computed(() =>
+  props.pageSizeOptions.map((size) => ({ value: size, label: `${size} 条/页` })),
+)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(props.total / Math.max(1, props.pageSize))))
 const rangeStart = computed(() => (props.total === 0 ? 0 : (props.page - 1) * props.pageSize + 1))
@@ -35,16 +41,17 @@ function goto(page: number) {
     </div>
 
     <div class="flex flex-wrap items-center gap-2">
-      <label class="flex items-center gap-1.5 text-xs">
-        每页
-        <select
-          class="input w-auto px-2 py-1 text-xs"
-          :value="pageSize"
-          @change="emit('update:pageSize', Number(($event.target as HTMLSelectElement).value))"
-        >
-          <option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option>
-        </select>
-      </label>
+      <div class="flex w-32 items-center gap-1.5 text-xs">
+        <span class="shrink-0 text-slate-500">每页</span>
+        <SelectMenu
+          class="min-w-0 flex-1"
+          :model-value="pageSize"
+          size="sm"
+          aria-label="每页条数"
+          :options="pageSizeSelectOptions"
+          @update:model-value="emit('update:pageSize', Number($event))"
+        />
+      </div>
 
       <div class="flex items-center gap-1">
         <button
