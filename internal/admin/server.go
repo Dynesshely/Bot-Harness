@@ -115,6 +115,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/affect/resume", s.protected(s.handleAffectResume))
 	s.mux.HandleFunc("POST /api/affect/preset", s.protected(s.handleAffectPreset))
 	s.mux.HandleFunc("POST /api/affect/reset", s.protected(s.handleAffectReset))
+	s.mux.HandleFunc("GET /api/join/decisions", s.protected(s.handleJoinDecisions))
+	s.mux.HandleFunc("GET /api/join/topics", s.protected(s.handleJoinTopics))
 	s.mux.HandleFunc("GET /api/commitments", s.protected(s.handleListCommitments))
 	s.mux.HandleFunc("DELETE /api/commitments/{id}", s.protected(s.handleCancelCommitment))
 	s.mux.HandleFunc("GET /api/memories", s.protected(s.handleListMemories))

@@ -41,6 +41,8 @@ var TableOrder = []string{
 	"affect_states",
 	"affect_events",
 	"affect_history",
+	"join_decisions",
+	"join_topics",
 	"memories",
 	"media",
 }

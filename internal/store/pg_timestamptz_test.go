@@ -25,6 +25,8 @@ var postgresTimestampColumns = []string{
 	"dedup.created_at",
 	"human_status.expires_at",
 	"human_status.updated_at",
+	"join_decisions.created_at",
+	"join_topics.analyzed_at",
 	"media.created_at",
 	"memories.created_at",
 	"memories.last_used_at",

@@ -93,6 +93,11 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	if block := d.affectBlock(ctx, conv.ID, s, cfg, time.Now()); block != "" {
 		systemPrompt = appendSystemBlock(systemPrompt, block)
 	}
+	// 话题背景只给「最近 15 分钟内分析过」的群，且明确标注仅作背景；
+	// 关闭 join gate 时连读库都不做，保证旧行为逐字节一致。
+	if block := d.joinTopicsBlock(ctx, conv, cfg); block != "" {
+		systemPrompt = appendSystemBlock(systemPrompt, block)
+	}
 	messages := BuildChatMessages(systemPrompt, history, userText, budget)
 
 	// 本轮消息带图时改用多模态输入。只对本轮生效：历史图片会显著推高 token

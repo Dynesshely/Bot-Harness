@@ -101,6 +101,12 @@ type harness struct {
 	commitmentCalls        int
 	humanStatusCalls       int
 	humanStatusVisionCalls int
+	// joinGateReply is the JSON verdict returned for the 自主加入判断 prompt;
+	// joinGateCalls counts those requests. The fake provider recognises them by
+	// the system-message marker, exactly like the polish/commitment calls.
+	joinGateReply    string
+	joinGateCalls    int
+	lastJoinGateBody map[string]any
 	// aiRejectTools makes the fake upstream answer HTTP 400 whenever the request
 	// carries a tools array (a gateway that does not support tool calling).
 	aiRejectTools bool
@@ -214,10 +220,11 @@ func newHarness(t *testing.T) *harness {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		// stage2（润色）不是主路径：它不能覆盖 lastAIBody，
-		// 也不该被当成一次「对话调用」计数。
+		// 也不该被当成一次「对话调用」计数。join gate 同理：它是判定调用。
 		stage2 := isPolishRequest(body)
+		joinGate := hasSystemText(body, joinGateMarkerText)
 		h.mu.Lock()
-		if !stage2 {
+		if !stage2 && !joinGate {
 			h.lastAIBody = body
 		}
 		fail := h.aiFail
@@ -232,6 +239,19 @@ func newHarness(t *testing.T) *harness {
 		}
 		if isPolishRequest(body) {
 			h.servePolish(w, body, streaming)
+			return
+		}
+		// 自主加入判断：系统提示里带固定标记，返回 JSON 判定（不是一条回复）。
+		if joinGate {
+			h.mu.Lock()
+			h.joinGateCalls++
+			verdict := h.joinGateReply
+			h.lastJoinGateBody = body
+			h.mu.Unlock()
+			if verdict == "" {
+				verdict = defaultJoinGateVerdict
+			}
+			writeJSONCompletion(w, verdict)
 			return
 		}
 		// 图片分析工具是独立的多模态请求：没有系统标记，只带 image_url part。
@@ -567,6 +587,48 @@ func (h *harness) waitForSent(t *testing.T, n int) []sentMessage {
 // polishMarker is how the fake provider recognises a stage-2 call: the polisher
 // instruction is the only thing that makes a request "the polish one".
 const polishMarker = "你是同一角色的润色器"
+
+// joinGateMarkerText mirrors core's unexported 自主加入判断 marker. The fake
+// provider routes on the system message, so no extra request state is needed.
+const joinGateMarkerText = "【自主加入判断】"
+
+// defaultJoinGateVerdict keeps the gate off unless a test asks it to join.
+const defaultJoinGateVerdict = `{"topics":[{"id":"t1","title":"群聊","summary":"最近的群聊","message_ids":[]}],"current_topic_id":"t1","join":false,"confidence":0.1,"reason":"测试默认不加入"}`
+
+func (h *harness) setJoinGateReply(reply string) {
+	h.mu.Lock()
+	h.joinGateReply = reply
+	h.mu.Unlock()
+}
+
+func (h *harness) joinGateCallCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.joinGateCalls
+}
+
+// waitForJoinGateCalls waits for the asynchronous dispatcher to reach n calls.
+func (h *harness) waitForJoinGateCalls(t *testing.T, n int) int {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := h.joinGateCallCount(); got >= n {
+			return got
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return h.joinGateCallCount()
+}
+
+// joinDecisions lists the recorded decisions of one group (newest first).
+func (h *harness) joinDecisions(t *testing.T, groupOpenID string) []store.JoinDecision {
+	t.Helper()
+	decisions, err := h.st.ListJoinDecisions(context.Background(), groupOpenID, 50)
+	if err != nil {
+		t.Fatalf("list join decisions: %v", err)
+	}
+	return decisions
+}
 
 // isPolishRequest reports whether the body is a stage-2 (polish) call.
 // hasSystemText reports whether any system message contains marker.
@@ -4534,5 +4596,270 @@ func TestNonAIBodiesAreNeverPolished(t *testing.T) {
 	sent = h.sentMessages()
 	if got := sent[len(sent)-1].Body.Content; got != "手动发送的原文" {
 		t.Fatalf("manual send must go out verbatim, got %q", got)
+	}
+}
+
+// --- 自主加入（join gate）----------------------------------------------------
+
+// joinGateJoinVerdict builds a valid verdict that joins, with one topic.
+func joinGateJoinVerdict(confidence float64, reason, title string) string {
+	return `{"topics":[{"id":"t1","title":"` + title + `","summary":"摘要","message_ids":[]}],"current_topic_id":"t1","join":true,"confidence":` +
+		strconv.FormatFloat(confidence, 'f', 2, 64) + `,"reason":"` + reason + `"}`
+}
+
+const joinGateSilentVerdict = `{"topics":[{"id":"t1","title":"闲聊","summary":"只是闲聊","message_ids":[]}],"current_topic_id":"t1","join":false,"confidence":0.2,"reason":"没有需要接住的东西"}`
+
+func (h *harness) waitForJoinDecisions(t *testing.T, groupOpenID string, n int) []store.JoinDecision {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		got := h.joinDecisions(t, groupOpenID)
+		if len(got) >= n {
+			return got
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return h.joinDecisions(t, groupOpenID)
+}
+
+// 开启 join gate 后，未 @ 的群消息被判定加入时也要回复（at_only 不再是硬门）。
+func TestJoinGateRepliesToUnaddressedMessage(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm"}`)
+	h.setJoinGateReply(joinGateJoinVerdict(0.9, "有人明确求助", "Go 求助"))
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JG1", "G1", "U1", "小明", "有人会 Go 吗"))
+
+	if sent := h.waitForSent(t, 1); len(sent) != 1 {
+		t.Fatalf("join gate should deliver one reply, got %d", len(sent))
+	}
+	if got := h.joinGateCallCount(); got != 1 {
+		t.Fatalf("join gate calls = %d, want 1", got)
+	}
+	decisions := h.waitForJoinDecisions(t, "G1", 1)
+	if len(decisions) != 1 || !decisions[0].Joined {
+		t.Fatalf("expected one joined decision, got %#v", decisions)
+	}
+	if decisions[0].Confidence != 0.9 || decisions[0].Preview != "有人会 Go 吗" {
+		t.Fatalf("decision fields wrong: %#v", decisions[0])
+	}
+	metrics := h.dis.Metrics()
+	if metrics.JoinGateEvals.Load() != 1 || metrics.JoinGateJoins.Load() != 1 {
+		t.Fatalf("metrics evals/joins = %d/%d, want 1/1",
+			metrics.JoinGateEvals.Load(), metrics.JoinGateJoins.Load())
+	}
+}
+
+// join=false 时保持沉默，但每次评估都要留一条可解释的 decision。
+func TestJoinGateSilentVerdictKeepsTheBotQuiet(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm"}`)
+	h.setJoinGateReply(joinGateSilentVerdict)
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JG2", "G1", "U1", "小明", "今天天气不错"))
+
+	decisions := h.waitForJoinDecisions(t, "G1", 1)
+	if len(decisions) != 1 || decisions[0].Joined {
+		t.Fatalf("expected one skipped decision, got %#v", decisions)
+	}
+	if decisions[0].Reason != "没有需要接住的东西" {
+		t.Fatalf("decision reason lost: %q", decisions[0].Reason)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if got := len(h.sentMessages()); got != 0 {
+		t.Fatalf("a false verdict must not send anything, got %d", got)
+	}
+	metrics := h.dis.Metrics()
+	if metrics.JoinGateEvals.Load() != 1 || metrics.JoinGateSkips.Load() != 1 || metrics.JoinGateJoins.Load() != 0 {
+		t.Fatalf("metrics evals/skips/joins = %d/%d/%d, want 1/1/0",
+			metrics.JoinGateEvals.Load(), metrics.JoinGateSkips.Load(), metrics.JoinGateJoins.Load())
+	}
+}
+
+// 默认关闭：未 @ 消息既不评估也不回复，行为与 v0.2.0 一致。
+func TestJoinGateOffByDefaultKeepsOldBehaviour(t *testing.T) {
+	h := newHarness(t)
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JG3", "G1", "U1", "小明", "随便聊聊"))
+	time.Sleep(300 * time.Millisecond)
+
+	if got := h.joinGateCallCount(); got != 0 {
+		t.Fatalf("join gate must stay dormant by default, got %d calls", got)
+	}
+	if got := len(h.sentMessages()); got != 0 {
+		t.Fatalf("at_only must still drop unaddressed messages, got %d sends", got)
+	}
+	metrics := h.dis.Metrics()
+	if metrics.JoinGateEvals.Load() != 0 || metrics.JoinGateSkips.Load() != 0 {
+		t.Fatalf("disabled gate must not move its counters: %+v", metrics.Snapshot())
+	}
+}
+
+// @ 消息永远跳过 join gate。
+func TestJoinGateSkipsAddressedMessages(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm"}`)
+
+	h.dis.HandlePayload(context.Background(), groupAtMessage("JG4", "G1", "U1", "小明", "你好"))
+
+	if sent := h.waitForSent(t, 1); len(sent) != 1 {
+		t.Fatalf("@ message should reply normally, got %d", len(sent))
+	}
+	if got := h.joinGateCallCount(); got != 0 {
+		t.Fatalf("@ messages must not be evaluated, got %d calls", got)
+	}
+	if decisions := h.joinDecisions(t, "G1"); len(decisions) != 0 {
+		t.Fatalf("@ messages must not write a decision: %#v", decisions)
+	}
+}
+
+// 全局关是总开关：按群 join_gate=true 也打不开。
+func TestJoinGateGroupOverrideCannotEnableGlobalOff(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"group_overrides":[{"group_openid":"G1","join_gate":true}]}`)
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JG5", "G1", "U1", "小明", "有人吗"))
+	time.Sleep(300 * time.Millisecond)
+
+	if got := h.joinGateCallCount(); got != 0 {
+		t.Fatalf("global off must win, got %d gate calls", got)
+	}
+	if got := len(h.sentMessages()); got != 0 {
+		t.Fatalf("global off must keep at_only behaviour, got %d sends", got)
+	}
+}
+
+// 群覆盖 false 可以关闭全局开启的功能。
+func TestJoinGateGroupOverrideCanDisable(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"group_overrides":[{"group_openid":"G1","join_gate":false}]}`)
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JG6", "G1", "U1", "小明", "有人吗"))
+	time.Sleep(300 * time.Millisecond)
+
+	if got := h.joinGateCallCount(); got != 0 {
+		t.Fatalf("group override false must disable the gate, got %d calls", got)
+	}
+	if got := len(h.sentMessages()); got != 0 {
+		t.Fatalf("disabled gate must not reply, got %d sends", got)
+	}
+}
+
+// 非法 JSON fail-closed：不回复，但写一条 gate error decision。
+func TestJoinGateFailsClosedOnBadJSON(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm"}`)
+	h.setJoinGateReply("我觉得可以加入，但没有 JSON")
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JG7", "G1", "U1", "小明", "有人会 Go 吗"))
+
+	decisions := h.waitForJoinDecisions(t, "G1", 1)
+	if len(decisions) != 1 || decisions[0].Joined {
+		t.Fatalf("expected one fail-closed decision, got %#v", decisions)
+	}
+	if !strings.HasPrefix(decisions[0].Reason, "gate error:") {
+		t.Fatalf("fail-closed reason should be explicit, got %q", decisions[0].Reason)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if got := len(h.sentMessages()); got != 0 {
+		t.Fatalf("a parse failure must not send anything, got %d", got)
+	}
+	if got := h.dis.Metrics().JoinGateErrors.Load(); got != 1 {
+		t.Fatalf("join gate errors = %d, want 1", got)
+	}
+	if got := h.dis.Metrics().JoinGateJoins.Load(); got != 0 {
+		t.Fatalf("a parse failure must not count as a join, got %d", got)
+	}
+}
+
+// 评估冷却：第二次评估在冷却期内直接跳过，且不再调用模型。
+func TestJoinGateCooldownSkipsWithoutCallingTheModel(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm","join_gate_eval_cooldown_seconds":600}`)
+	h.setJoinGateReply(joinGateSilentVerdict)
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JG8", "G1", "U1", "小明", "第一句话"))
+	if got := h.waitForJoinGateCalls(t, 1); got != 1 {
+		t.Fatalf("first message should be evaluated, got %d calls", got)
+	}
+	h.waitForJoinDecisions(t, "G1", 1)
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JG9", "G1", "U1", "小明", "第二句话"))
+
+	decisions := h.waitForJoinDecisions(t, "G1", 2)
+	if len(decisions) != 2 {
+		t.Fatalf("cooldown skip must still record a decision, got %d", len(decisions))
+	}
+	if !strings.HasPrefix(decisions[0].Reason, "cooldown:") {
+		t.Fatalf("newest decision should explain the cooldown, got %q", decisions[0].Reason)
+	}
+	if got := h.joinGateCallCount(); got != 1 {
+		t.Fatalf("a cooldown skip must not call the model again, got %d calls", got)
+	}
+	if got := h.dis.Metrics().JoinGateSkips.Load(); got != 2 {
+		t.Fatalf("skips = %d, want 2", got)
+	}
+}
+
+// 话题缓存：解析成功后落库，并在 15 分钟内的后续回复里作为背景注入。
+func TestJoinGateTopicsBecomeBackground(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm"}`)
+	h.setJoinGateReply(joinGateJoinVerdict(0.9, "话题延续", "部署讨论"))
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JG10", "G1", "U1", "小明", "容器怎么部署比较好"))
+	if sent := h.waitForSent(t, 1); len(sent) != 1 {
+		t.Fatalf("expected the gate reply, got %d", len(sent))
+	}
+
+	topics, err := h.st.GetJoinTopics(context.Background(), "G1")
+	if err != nil {
+		t.Fatalf("get join topics: %v", err)
+	}
+	if topics == nil || !strings.Contains(topics.TopicsJSON, "部署讨论") {
+		t.Fatalf("topics were not persisted: %#v", topics)
+	}
+	if got := h.dis.Metrics().JoinGateTopics.Load(); got != 1 {
+		t.Fatalf("join gate topics counter = %d, want 1", got)
+	}
+
+	// 后续 @ 消息的回复应带上话题背景。
+	h.dis.HandlePayload(context.Background(), groupAtMessage("JG11", "G1", "U1", "小明", "那你觉得呢"))
+	if sent := h.waitForSent(t, 2); len(sent) != 2 {
+		t.Fatalf("expected the second reply, got %d", len(sent))
+	}
+	probe := h.systemPrompt(t)
+	if !strings.Contains(probe.text, "群里最近的话题（仅背景，不要强行转回）") {
+		t.Fatalf("topic background block missing:\n%s", probe.text)
+	}
+	if !strings.Contains(probe.text, "部署讨论") {
+		t.Fatalf("topic title missing from the background block:\n%s", probe.text)
+	}
+}
+
+// join_gate_model 只作用于判定调用；判定请求的参数也是契约的一部分。
+func TestJoinGateUsesConfiguredModelAndParameters(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm","join_gate_model":"gate-model"}`)
+	h.setJoinGateReply(joinGateSilentVerdict)
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JG12", "G1", "U1", "小明", "试试看"))
+	if got := h.waitForJoinGateCalls(t, 1); got != 1 {
+		t.Fatalf("expected one gate call, got %d", got)
+	}
+
+	h.mu.Lock()
+	body := h.lastJoinGateBody
+	h.mu.Unlock()
+	if body == nil {
+		t.Fatal("the gate request was not captured")
+	}
+	if got, _ := body["model"].(string); got != "gate-model" {
+		t.Fatalf("gate model = %q, want gate-model", got)
+	}
+	if got, _ := body["temperature"].(float64); got != 0.1 {
+		t.Fatalf("gate temperature = %v, want 0.1", got)
+	}
+	if got, _ := body["max_tokens"].(float64); got != 600 {
+		t.Fatalf("gate max_tokens = %v, want 600", got)
 	}
 }

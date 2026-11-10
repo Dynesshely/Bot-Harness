@@ -600,10 +600,23 @@ func (d *Dispatcher) route(in *Inbound) {
 		return
 	}
 
+	// 自主加入：未 @ 的群消息先由 join gate 判断要不要开口。它排在 trigger gate
+	// 之前，所以 at_only 群里被判定加入的消息也能继续走回复管线；总开关关闭时
+	// 这个分支根本不执行，行为与 v0.2.0 完全一致。
+	joinedByGate := false
+	if in.Scene == "group" && !in.AtBot && cfg.JoinGateEnabled {
+		if !d.maybeJoinGroupChat(context.Background(), in, conv, cfg, s) {
+			d.observe(in, conv)
+			drop("join_gate")
+			return
+		}
+		joinedByGate = true
+	}
+
 	// Trigger gate. In full-group mode every message arrives as
 	// GROUP_MESSAGE_CREATE, so at_only must be decided from the mention list
 	// rather than from the event type alone.
-	if in.Scene == "group" && !in.AtBot && cfg.TriggerMode != settings.TriggerAllMessages {
+	if in.Scene == "group" && !in.AtBot && !joinedByGate && cfg.TriggerMode != settings.TriggerAllMessages {
 		// The bot can see the whole group in full-group mode. Keep what it
 		// witnessed so the conversation page is a complete timeline, but never
 		// feed it to the model and never answer it.
@@ -624,7 +637,8 @@ func (d *Dispatcher) route(in *Inbound) {
 	}
 
 	// 人味：没 @ 机器人的消息偶尔不接话。@ 了一定回，这里只处理「可以不接」的情况。
-	if in.Scene == "group" && !in.AtBot {
+	// join gate 已经明确决定加入的消息不再随机沉默。
+	if in.Scene == "group" && !in.AtBot && !joinedByGate {
 		level := humanizeLevel(s, cfg)
 		boost := 0.0
 		if d.affect != nil {
