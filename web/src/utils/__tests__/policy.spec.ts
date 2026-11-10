@@ -35,6 +35,8 @@ const FULL_ROW: GroupOverride = {
   humanize: 'strong',
   web: false,
   exec: true,
+  affect: false,
+  affect_inject_mode: 'full',
   polish: true,
   rate_limit_group_qpm: 12,
 }
@@ -45,6 +47,18 @@ describe('toGroupOverridePayload', () => {
     for (const key of CAPABILITY_KEYS) {
       expect(row[key], `保存后 ${key} 被抹掉了`).toEqual(FULL_ROW[key])
     }
+  })
+
+  it('情绪状态覆盖透传：affect 布尔与 affect_inject_mode 档位都不丢', () => {
+    const [row] = toGroupOverridePayload([FULL_ROW])
+    expect(row.affect).toBe(false)
+    expect(row.affect_inject_mode).toBe('full')
+
+    // 显式 true 仍然是 true，未填 = 跟随全局（null）
+    expect(toGroupOverridePayload([{ ...FULL_ROW, affect: true }])[0].affect).toBe(true)
+    const [empty] = toGroupOverridePayload([{ group_openid: 'g2' }])
+    expect(empty.affect).toBeNull()
+    expect(empty.affect_inject_mode).toBeNull()
   })
 
   it('两阶段生成的 polish 覆盖原样透传（显式 false 也不被吞）', () => {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useConfig } from '@/composables/configContext'
+import AppIcon from '@/components/AppIcon.vue'
 import NumberField from '@/components/NumberField.vue'
 import TextField from '@/components/TextField.vue'
 import ToggleField from '@/components/ToggleField.vue'
@@ -142,6 +143,54 @@ const { draft } = useConfig()
           <p class="field-hint mt-2">
             群记忆只在该群可见，个人记忆只在该成员私聊可见；全局记忆只有管理员明确要求时才会写入。
             记忆内容可在「长期记忆」页查看与删除。
+          </p>
+        </div>
+
+        <!-- 情绪状态：默认关，内容包默认日常心境；详细配置与状态预览在独立页面 -->
+        <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 class="flex items-center gap-2 text-sm font-medium text-slate-200">
+              情绪状态
+              <span
+                class="badge"
+                :class="
+                  draft.affect_enabled
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                    : 'border-slate-700 bg-slate-800/60 text-slate-400'
+                "
+              >
+                {{ draft.affect_enabled ? '已启用' : '默认关闭' }}
+              </span>
+            </h3>
+            <RouterLink :to="{ name: 'affect' }" class="btn btn-sm">
+              前往情绪状态页
+              <AppIcon name="chevronRight" :size="14" />
+            </RouterLink>
+          </div>
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div>
+              <p class="label">内容包 affect_pack</p>
+              <p class="text-sm text-slate-200">
+                {{ draft.affect_pack === 'daily' ? 'daily · 日常心境' : (draft.affect_pack || 'daily') }}
+              </p>
+              <p class="field-hint">默认使用内置的「日常心境」内容包</p>
+            </div>
+            <div>
+              <p class="label">注入档位 affect_inject_mode</p>
+              <p class="text-sm text-slate-200">{{ draft.affect_inject_mode }}</p>
+              <p class="field-hint">off 不注入 / line 一行 / full 多段</p>
+            </div>
+            <div>
+              <p class="label">事件分类器 affect_event_classifier</p>
+              <p class="text-sm text-slate-200">{{ draft.affect_event_classifier }}</p>
+              <p class="field-hint">rules 按内容包正则匹配，默认开启</p>
+            </div>
+          </div>
+          <p class="field-hint mt-2">
+            根据对话内容维护 5 维情绪数值，并把状态作为语气参考注入提示词、轻微调整回复长度与主动性。
+            <b>默认关闭</b>，关闭时现有行为零变化；内容包默认「日常心境」（daily）。
+            开关、数值、历史曲线、暂停/预设与注入预览都在
+            <RouterLink :to="{ name: 'affect' }" class="link">情绪状态</RouterLink> 页。
           </p>
         </div>
 

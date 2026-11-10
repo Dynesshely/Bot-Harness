@@ -1,5 +1,10 @@
 import { request, requestEnvelope } from './client'
 import type {
+  AffectConversationsData,
+  AffectEventsData,
+  AffectHistoryData,
+  AffectPacksData,
+  AffectStateData,
   ConfigData,
   ConfigUpdateResult,
   Conversation,
@@ -359,5 +364,80 @@ export const commitmentsApi = {
 export const proactiveApi = {
   overview(signal?: AbortSignal): Promise<ProactiveOverview> {
     return request<ProactiveOverview>('/proactive', { signal })
+  },
+}
+
+/* ------------------------------------------------------------------ *
+ * 情绪状态（Affect）
+ * ------------------------------------------------------------------ */
+
+export const affectApi = {
+  /** 可用的内容包（内置包随二进制嵌入）。 */
+  packs(signal?: AbortSignal): Promise<AffectPacksData['packs']> {
+    return request<AffectPacksData>('/affect/packs', { signal }).then((data) => data.packs ?? [])
+  },
+  /** 有情绪状态的会话，按更新时间倒序。 */
+  conversations(limit = 50, signal?: AbortSignal): Promise<AffectConversationsData['conversations']> {
+    return request<AffectConversationsData>('/affect/conversations', {
+      query: { limit },
+      signal,
+    }).then((data) => data.conversations ?? [])
+  },
+  /** 某会话的状态 + 行为摘要 + 注入预览。 */
+  state(conversation: string, signal?: AbortSignal): Promise<AffectStateData> {
+    return request<AffectStateData>('/affect/state', {
+      query: { conversation },
+      signal,
+    })
+  },
+  /** 历史点；hours 支持 24 / 168。 */
+  history(
+    conversation: string,
+    hours = 24,
+    signal?: AbortSignal,
+  ): Promise<AffectHistoryData['points']> {
+    return request<AffectHistoryData>('/affect/history', {
+      query: { conversation, hours },
+      signal,
+    }).then((data) => data.points ?? [])
+  },
+  /** 最近事件日志。 */
+  events(
+    conversation: string,
+    limit = 50,
+    signal?: AbortSignal,
+  ): Promise<AffectEventsData['events']> {
+    return request<AffectEventsData>('/affect/events', {
+      query: { conversation, limit },
+      signal,
+    }).then((data) => data.events ?? [])
+  },
+  /** 暂停情绪影响（minutes 分钟）。 */
+  pause(conversation: string, minutes: number): Promise<unknown> {
+    return request<unknown>('/affect/pause', {
+      method: 'POST',
+      body: { conversation, minutes },
+    })
+  },
+  /** 立即恢复。 */
+  resume(conversation: string): Promise<unknown> {
+    return request<unknown>('/affect/resume', {
+      method: 'POST',
+      body: { conversation },
+    })
+  },
+  /** 套用内容包预设（calm / focused / cheerful / low_battery）。 */
+  preset(conversation: string, preset: string): Promise<unknown> {
+    return request<unknown>('/affect/preset', {
+      method: 'POST',
+      body: { conversation, preset },
+    })
+  },
+  /** 重置该会话的情绪状态。 */
+  reset(conversation: string): Promise<unknown> {
+    return request<unknown>('/affect/reset', {
+      method: 'POST',
+      body: { conversation },
+    })
   },
 }

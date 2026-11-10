@@ -78,6 +78,13 @@ describe('emptyDraft', () => {
     expect(draft.human_status_timeline_messages).toBe(120)
     expect(draft.human_status_vision_enabled).toBe(true)
     expect(draft.human_status_vision_model).toBe('')
+    // 情绪状态：与后端 Defaults() 对齐（默认关、daily、line、rules、300s、120 tokens）
+    expect(draft.affect_enabled).toBe(false)
+    expect(draft.affect_pack).toBe('daily')
+    expect(draft.affect_inject_mode).toBe('line')
+    expect(draft.affect_event_classifier).toBe('rules')
+    expect(draft.affect_tick_seconds).toBe(300)
+    expect(draft.affect_inject_max_tokens).toBe(120)
     expect(draft.exec_enabled).toBe(false)
     expect(draft.tls_insecure_verify).toBe(false)
     expect(draft.tls_extra_ca_files).toEqual([])
@@ -119,6 +126,12 @@ describe('assign', () => {
       human_status_timeline_messages: 240,
       human_status_vision_enabled: false,
       human_status_vision_model: 'qwen-vl-max',
+      affect_enabled: true,
+      affect_pack: 'daily',
+      affect_inject_mode: 'full',
+      affect_event_classifier: 'off',
+      affect_tick_seconds: 180,
+      affect_inject_max_tokens: 200,
       qq_intents: 1,
       http_addr: ':9000',
       media_max_bytes: 1024,
@@ -153,6 +166,12 @@ describe('assign', () => {
     expect(target.human_status_timeline_messages).toBe(240)
     expect(target.human_status_vision_enabled).toBe(false)
     expect(target.human_status_vision_model).toBe('qwen-vl-max')
+    expect(target.affect_enabled).toBe(true)
+    expect(target.affect_pack).toBe('daily')
+    expect(target.affect_inject_mode).toBe('full')
+    expect(target.affect_event_classifier).toBe('off')
+    expect(target.affect_tick_seconds).toBe(180)
+    expect(target.affect_inject_max_tokens).toBe(200)
     // 后端下发了才采用，不再用本地兜底值
     expect(target.qq_intents).toBe(1)
     expect(target.http_addr).toBe(':9000')
@@ -291,6 +310,38 @@ describe('buildPatch：只提交改动字段', () => {
       human_status_timeline_messages: 0,
       human_status_vision_enabled: false,
       human_status_vision_model: '',
+    })
+  })
+
+  it('情绪状态：默认关闭不提交；显式 true / false / 档位 / 数值都会进补丁', () => {
+    // 空草稿与空基线完全一致 → 一个键都不发
+    expect(buildPatch(draftOf(), draftOf())).toEqual({})
+
+    const base = draftOf()
+    expect(
+      buildPatch(
+        draftOf({
+          affect_enabled: true,
+          affect_pack: 'custom-pack',
+          affect_inject_mode: 'full',
+          affect_event_classifier: 'off',
+          affect_tick_seconds: 60,
+          affect_inject_max_tokens: 300,
+        }),
+        base,
+      ),
+    ).toEqual({
+      affect_enabled: true,
+      affect_pack: 'custom-pack',
+      affect_inject_mode: 'full',
+      affect_event_classifier: 'off',
+      affect_tick_seconds: 60,
+      affect_inject_max_tokens: 300,
+    })
+
+    // 布尔 false 是真实值（停用），必须照发
+    expect(buildPatch(draftOf({ affect_enabled: false }), draftOf({ affect_enabled: true }))).toEqual({
+      affect_enabled: false,
     })
   })
 

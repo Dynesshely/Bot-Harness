@@ -215,6 +215,8 @@ function addOverride() {
     trigger_mode: null,
     context_mode: null,
     polish: null,
+    affect: null,
+    affect_inject_mode: null,
     rate_limit_group_qpm: null,
   })
 }
@@ -247,7 +249,8 @@ function setOverrideEnabled(row: GroupOverride, value: string) {
 
 /** 枚举档位覆盖：'' = 跟随全局（null）。 */
 function setOverrideLevel(row: GroupOverride, key: OverrideLevelKey, value: string) {
-  row[key] = value === '' ? null : value
+  // affect_inject_mode 是受约束的枚举，其余档位是普通字符串：统一按可空字符串写入。
+  ;(row as unknown as Record<string, string | null>)[key] = value === '' ? null : value
 }
 
 function setOverrideQpm(row: GroupOverride, value: string) {
@@ -628,6 +631,8 @@ function setOverrideQpm(row: GroupOverride, value: string) {
                 <th class="th min-w-[8rem]">人味 humanize</th>
                 <th class="th min-w-[8rem]">联网 web</th>
                 <th class="th min-w-[8rem]">执行 exec</th>
+                <th class="th min-w-[8rem]">情绪 affect</th>
+                <th class="th min-w-[9rem]">注入档位 affect_inject_mode</th>
                 <th class="th min-w-[8rem]">润色 polish</th>
                 <th class="th min-w-[9rem]">机器人共存</th>
                 <th class="th min-w-[9rem]">引用回复</th>
@@ -768,6 +773,29 @@ function setOverrideQpm(row: GroupOverride, value: string) {
                     <option value="">跟随全局</option>
                     <option value="true">开启</option>
                     <option value="false">关闭</option>
+                  </select>
+                </td>
+                <td class="td">
+                  <select
+                    class="input"
+                    :value="row.affect === null || row.affect === undefined ? '' : String(row.affect)"
+                    @change="setOverrideBool(row, 'affect', ($event.target as HTMLSelectElement).value)"
+                  >
+                    <option value="">跟随全局</option>
+                    <option value="true">开启</option>
+                    <option value="false">关闭</option>
+                  </select>
+                </td>
+                <td class="td">
+                  <select
+                    class="input"
+                    :value="row.affect_inject_mode ?? ''"
+                    @change="setOverrideLevel(row, 'affect_inject_mode', ($event.target as HTMLSelectElement).value)"
+                  >
+                    <option value="">跟随全局</option>
+                    <option value="off">off</option>
+                    <option value="line">line</option>
+                    <option value="full">full</option>
                   </select>
                 </td>
                 <td class="td">
