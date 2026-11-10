@@ -30,15 +30,16 @@
 **三分类**（join / wait / skip）、`addressed_to` 与话题切分；引用机器人视同被 @；
 话题带生命周期（`active` / `dormant` / `closed` + `resumable`），代码按消息年龄单向降级。
 图片能力新增**引用 / 合并图片入库**、模型可见的 `[图片 #id]` 标注与按需 `view_image` 工具。
-**默认关闭**（图片能力沿用 `vision_enabled` 默认开）；关闭时回复、触发模式、proactive
-与 0.2.0 完全一致。
+join_gate **默认关闭**；图片能力沿用 `vision_enabled`（默认开）。关闭 join_gate 时回复、
+触发模式、proactive 与 0.2.0 完全一致。
 
 ### Added
 
 - **自主加入（join_gate）**：群聊未 @ 文本消息先过闸门，再由一次 LLM 调用产出
   **`action` = `join` / `wait` / `skip`**、`addressed_to`、`confidence` / `reason` 与
-  1–8 个话题（`title` / `summary` / `message_ids`，可选 `type`）；只有 `join` 进入原回复
-  管线，`wait` / `skip` 只写 decision、不回复；解析失败 / 超时 / 非法 `action` 一律 fail-closed。
+  1–8 个话题（`title` / `summary` / `message_ids`，可选 `type` / `status` / `resumable`）；
+  只有 `join` 进入原回复管线，`wait` / `skip` 只写 decision、不回复；
+  解析失败 / 超时 / 非法 `action` / 非法 `status` 一律 fail-closed。
 - **引用机器人识别**：入站的 `ref_msg_idx` 与本地 `messages.quote_index` 比对（只认本群、
   assistant 消息），命中即 `AtBot` / `ReplyToBot`，与 @ 一样**跳过 join gate**；
   查询 1s 超时，失败只记 DEBUG、按未命中处理（fail-open，不影响回复）。
@@ -49,14 +50,29 @@
   最小加入间隔（5 分钟）、置信度下限（0.7）；超限不调模型，但仍写 decision。
 - **话题背景**：最近一次话题缓存（每群一行）在 15 分钟内、以 ≤400 字作为回复背景注入，
   放在 affect 块之后；不要求模型强行转回话题。
-- **后台页**：新路由 `/join`（侧栏「自主加入」）—— 启用与 10 个参数、按群名选群、
-  最近决策列表（插话 / 等一等 / 不插话）、最新话题面板、一键启用 / 停用与成本提示。
+- **话题生命周期**：每个话题新增 `status`（`active` / `dormant` / `closed`）与
+  `resumable`。代码按话题最新消息年龄**单向降级**：超过 `join_gate_topic_dormant_minutes`
+  （默认 20）`active` → `dormant`，超过 `join_gate_topic_closed_minutes`（默认 180）
+  任何非 `closed` → `closed`；时间不会把结束的话题升回来。`closed` 不可接回、
+  `dormant` 只在被新消息明显接回时继续；上次话题（≤8 条 / 500 字）回灌给闸门模型，
+  回复背景按状态标注，全部 `closed` 时不注入。
+- **后台页**：新路由 `/join`（侧栏「自主加入」）—— 启用与 12 个参数、按群名选群、
+  最近决策列表（插话 / 等一等 / 不插话）、最新话题面板（含状态 / 可接回）、一键启用 / 停用与成本提示。
+- **图片（引用 / 合并 + 按需查看）**：入站时递归展开 `msg_elements`，把引用消息、合并 / 转发
+  消息里的图片与当前消息图片一起缓存（sha256 内容寻址，同 URL 去重）；模型输入追加
+  `[图片 #id]` / `[引用图片 #id]`，历史消息里的已缓存图片也会标（只进模型输入，不写正文）。
+  新增只读工具 `view_image`（`media_id` + 可选 `question`），按需返回 ≤500 字描述；
+  只在 `vision_enabled` 且工具开启时下发，复用 `human_status_vision_model`（空 = 主模型）。
+  当前图片仍按 `vision_max_images` 内联，引用 / 合并图片不内联、只走工具；
+  失败（id 失效、非图片、视觉未启用、未配置模型、调用失败）一律返回「图片不可用：…」文本，
+  不阻断回复。
 - **全站下拉**：新增 `SelectMenu`（按钮 + popover、键盘 Arrow / Enter / Escape、点击外部关闭、
   aria），替换管理后台所有原生 `<select>`；策略页按群覆盖改为「每群一张卡」的 2–3 列 grid
   （窄屏单列 + 搜索框），不再横向滚动。
 - **设置**：`join_gate_enabled`（false）、`join_gate_mode`（`llm`）、`join_gate_model`（空）、
   `join_gate_window`（20）、`join_gate_confidence`（0.7）、`join_gate_eval_cooldown_seconds`（60）、
-  `join_gate_wait_retry_seconds`（30）、`join_gate_min_interval_minutes`（5）、
+  `join_gate_wait_retry_seconds`（30）、`join_gate_topic_dormant_minutes`（20）、
+  `join_gate_topic_closed_minutes`（180，必须大于 dormant）、`join_gate_min_interval_minutes`（5）、
   `join_gate_max_per_hour`（3）、`join_gate_max_per_day`（12）；
   `group_overrides[]` 新增 `join_gate`。
 - **API**：`GET /api/join/decisions`（决策新增 `action` 字段）、`GET /api/join/topics`、
@@ -66,17 +82,24 @@
 - **存储**：SQLite 迁移 `0014_join_gate`（`join_decisions` 含 `action` 列，老库自动补列；
   补 `idx_messages_quote_index`）；PostgreSQL `pgSchema` 新增 `join_decisions` /
   `join_topics` 两表、`action` 列与索引；会话删除 / 清空级联清理 decisions。
-- **文档**：新增 [docs/JOIN-GATE.md](docs/JOIN-GATE.md)；README 增加 §5.17；
-  ADMIN-API 升到 v1.9（§6.8 + §5 群名端点）；DECISIONS 增加 D-048（含 v2 取舍）；
-  AGENTS 增加第 21 条（引用识别与三分类）。
+- **文档**：新增 [docs/JOIN-GATE.md](docs/JOIN-GATE.md) 与
+  [docs/VISION.md](docs/VISION.md)；README 增加 §5.17 与 §5.9 的视觉工具说明；
+  ADMIN-API 升到 v1.9（§6.8 + §5 群名端点 + 生命周期字段）；DECISIONS 增加 D-048
+  （含 v2 生命周期取舍）与 D-049（图片工具）；AGENTS 增加第 21 条（引用识别、三分类与生命周期）
+  与第 22 条（图片工具）。
 
 ### Changed
 
 - `GET /api/status` 的 `counters` 由 **24 项变为 30 项**（新增 join_gate 6 项；既有字段不变）。
 - `GET /api/join/decisions` 的每条 decision 新增 `action`（`join` / `wait` / `skip`）；
   `joined` 保留并由 `action=="join"` 派生，历史行 `action=""` 按 `joined` 回退。
+  decision / topics 里的话题 JSON 增加 `status` 与 `resumable`；二者都是派生展示字段，
+  老前端忽略即可。
 - `GET /api/config` 的 `editable`、`PUT /api/config` 与 `/api/policies` 的按群覆盖
-  接受 join_gate 键；配置键 golden 需同步（新增 `join_gate_wait_retry_seconds`）。
+  接受 join_gate 键；配置键 golden 需同步（新增 `join_gate_wait_retry_seconds` /
+  `join_gate_topic_dormant_minutes` / `join_gate_topic_closed_minutes`）。
+- 图片入站缓存从顶层 `attachments` 扩展到 `msg_elements`（引用 / 合并），模型输入增加图片 id
+  标注；新增 `view_image` 工具。视觉模型复用 `human_status_vision_model`，未新增配置键。
 - `GET /api/policies` 的 `group_overrides[]` 增加 `join_gate`（`bool | null`）；
   全局 `join_gate_enabled` 是总开关，群覆盖只能进一步关闭或显式开启，不能越过全局关。
 - 后台导航新增「自主加入」（`/join`）；策略与加入页改用 `SelectMenu` 与群名卡片；
@@ -96,9 +119,15 @@
 - decision 里的消息预览 **≤80 字**，日志不记消息全文；不把系统提示词交给模型，
   模型只输出 JSON，不生成回复。`addressed_to` 只进提示词与 INFO 日志（加入成功时），不落新列。
 - 群名端点只读本地 `conversations.group_name`，不调平台、不新增存储；未知群返回空串。
+- **图片只在 `vision_enabled` 时进入模型**：当前图片受 `vision_max_images` 限制，引用 / 合并
+  图片不内联；`view_image` 只读、只在工具开启时下发，失败只返回文本、不阻断回复。
+  图片仍只从 QQ 附件域名抓取、受 `media_max_bytes` 限制；工具审计只记 `media_id` /
+  `question`（截断 500 字），**不落图片描述**；不提供跨会话图片列表或搜索。
 - 不做用户画像、不写记忆、不跨群聚合；不做骚扰 / 广告 / 引流；
   频率是硬闸门（评估冷却、每小时 / 每天上限、最小间隔、置信度）。
 - 不做向量聚类、不建 embedding / 向量库，没有规则版判定。
+- **话题生命周期只做展示与提示**：`status` / `resumable` 不参与频率、安全或权限判断；
+  `closed` 是提示词 + `resumable=false` 的输入约束，不是代码层硬过滤。
 
 ## [0.2.0] - 2026-11-10
 
