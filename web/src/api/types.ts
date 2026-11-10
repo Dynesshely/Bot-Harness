@@ -233,6 +233,33 @@ export interface EditableConfig {
   /** 图片分析使用的视觉模型名；空串 = 主模型。 */
   human_status_vision_model?: string
   /**
+   * 自主加入：未 @ 的群消息由模型判断是否加入（全局总开关，默认关）。
+   * 按群覆盖 group_overrides[].join_gate 只能在此基础上进一步关闭。
+   */
+  join_gate_enabled?: boolean
+  /** 自主加入模式：off 只记录不评估 / llm 交给模型判断。 */
+  join_gate_mode?: string
+  /** 评估使用的模型名；空串 = 主模型。 */
+  join_gate_model?: string
+  /** 评估时取最近多少条群消息（5–50，默认 20）。 */
+  join_gate_window?: number
+  /** 模型判断「值得加入」的最低置信度（0–1，默认 0.7）。 */
+  join_gate_confidence?: number
+  /** 同群两次评估的最小间隔（秒，10–3600，默认 60）。 */
+  join_gate_eval_cooldown_seconds?: number
+  /** 上次判定 wait 时，满这个秒数可由下一条新消息触发提前重评估（10–300，默认 30）。 */
+  join_gate_wait_retry_seconds?: number
+  /** 话题多少分钟没新消息算休眠（5–240，默认 20）。 */
+  join_gate_topic_dormant_minutes?: number
+  /** 话题多少分钟没新消息算结束（30–1440，默认 180，必须大于休眠阈值）。 */
+  join_gate_topic_closed_minutes?: number
+  /** 两次加入之间的最小间隔（分钟，1–240，默认 5）。 */
+  join_gate_min_interval_minutes?: number
+  /** 每小时最多加入几次（1–30，默认 3）。 */
+  join_gate_max_per_hour?: number
+  /** 每天最多加入几次（1–100，默认 12）。 */
+  join_gate_max_per_day?: number
+  /**
    * 情绪状态：按内容包积累 5 维数值，注入到系统提示词并影响回复行为。
    * 默认关；关闭时现有行为零变化。
    */
@@ -390,6 +417,8 @@ export interface GroupOverride {
   affect?: boolean | null
   /** 该群情绪注入档位（off / line / full）；null / 省略 = 跟随全局。 */
   affect_inject_mode?: AffectInjectMode | null
+  /** 该群是否启用「自主加入」（未 @ 消息由模型判断是否加入）；null / 省略 = 跟随全局。 */
+  join_gate?: boolean | null
   /** 0 / null = 不单独限流。 */
   rate_limit_group_qpm?: number | null
 }
@@ -768,6 +797,80 @@ export interface QuoteReplyState {
   override?: boolean | null
   /** 全局默认值。 */
   global: boolean
+}
+
+/* ------------------------------------------------------------------ *
+ * 自主加入（join_gate）
+ * ------------------------------------------------------------------ */
+
+/** 话题类型（模型输出；缺省 / 未知按 other 展示）。 */
+export type JoinTopicType = 'help' | 'chat' | 'question' | 'plan' | 'conflict' | 'joke' | 'other'
+
+/**
+ * 话题生命周期（模型输出，后端会按时间只降不升）：
+ * active 进行中 / dormant 暂歇 / closed 已结束。
+ * 老数据（契约 v2 之前）没有这个字段，页面按 active 展示。
+ */
+export type JoinTopicStatus = 'active' | 'dormant' | 'closed'
+
+/** 话题里的一条消息（message_ids 对应群消息的本地 id）。 */
+export interface JoinGateTopic {
+  id: string
+  title: string
+  summary: string
+  message_ids: number[]
+  /** 话题类型；老数据 / 模型未给时为空。 */
+  type?: JoinTopicType | string
+  /** 话题状态；老数据 / 模型未给时按 active 展示。 */
+  status?: JoinTopicStatus | string
+  /** 这个话题还值不值得被新消息接回（closed 恒为 false，后端解析时已强制）。 */
+  resumable?: boolean
+}
+
+/** 一条加入评估决策（joined=false 也会记录，便于解释「为什么没接」）。 */
+export interface JoinDecisionItem {
+  id: number
+  group_openid: string
+  conversation_id: string
+  /** 触发评估的那条群消息 id。 */
+  message_id: string
+  speaker: string
+  /** 消息预览（后端截断到 80 字）。 */
+  preview: string
+  joined: boolean
+  /**
+   * 三分类判定：join 插话 / wait 等一等 / skip 不插话。
+   * 契约 v2 之后后端才返回；老库里没有该列时为空，前端按 joined 兜底。
+   */
+  action?: 'join' | 'wait' | 'skip' | string
+  /** 模型判断这条消息是冲着谁说的（bot / group / someone_else / unknown）。 */
+  addressed_to?: string
+  confidence: number
+  reason: string
+  /**
+   * 该次判定的话题。存储层是 TEXT（JSON 字符串），但 ADMIN-API 契约示例
+   * 与未来后端可能直接返回数组或 {topics:[…]}，页面解析统一容错。
+   */
+  topics: string | JoinGateTopic[]
+  model: string
+  latency_ms: number
+  created_at: string
+}
+
+/** 某个群最近一次话题分析结果。 */
+export interface JoinTopicsState {
+  group_openid: string
+  /** 话题（JSON 字符串或数组）；结构同 JoinGateTopic[]。 */
+  topics: string | JoinGateTopic[]
+  analyzed_at: string
+}
+
+export interface JoinDecisionsData {
+  decisions: JoinDecisionItem[]
+}
+
+export interface JoinTopicsData {
+  topics: JoinTopicsState | null
 }
 
 /* ------------------------------------------------------------------ *

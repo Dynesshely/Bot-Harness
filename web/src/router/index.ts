@@ -55,6 +55,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '情绪状态' },
       },
       {
+        path: 'join',
+        name: 'join',
+        component: () => import('@/pages/JoinPage.vue'),
+        meta: { title: '自主加入' },
+      },
+      {
         path: 'messages',
         name: 'messages',
         component: () => import('@/pages/MessagesPage.vue'),

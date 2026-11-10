@@ -5,6 +5,7 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import CopyButton from '@/components/CopyButton.vue'
 import { conversationsApi, isAbortError, mergeApi, toMessage } from '@/api'
@@ -24,6 +25,13 @@ const SCENES: { value: ConversationScene | ''; label: string }[] = [
   { value: 'group_member', label: '群成员' },
   { value: 'group_shared', label: '群共享' },
   { value: 'c2c', label: '单聊' },
+]
+
+/** 启用状态筛选：'' 表示不过滤。 */
+const ENABLED_FILTERS: { value: '' | 'true' | 'false'; label: string }[] = [
+  { value: '', label: '全部状态' },
+  { value: 'true', label: '已启用' },
+  { value: 'false', label: '已暂停' },
 ]
 
 const q = ref('')
@@ -240,31 +248,23 @@ const activeFilterCount = computed(
         </div>
 
         <div class="w-36">
-          <label class="label" for="conv-scene">场景</label>
-          <select
+          <SelectMenu
             id="conv-scene"
             v-model="scene"
-            class="input"
+            label="场景"
+            :options="SCENES"
             @change="onFilterChange"
-          >
-            <option v-for="item in SCENES" :key="item.value" :value="item.value">
-              {{ item.label }}
-            </option>
-          </select>
+          />
         </div>
 
         <div class="w-32">
-          <label class="label" for="conv-enabled">状态</label>
-          <select
+          <SelectMenu
             id="conv-enabled"
             v-model="enabledFilter"
-            class="input"
+            label="状态"
+            :options="ENABLED_FILTERS"
             @change="onFilterChange"
-          >
-            <option value="">全部状态</option>
-            <option value="true">已启用</option>
-            <option value="false">已暂停</option>
-          </select>
+          />
         </div>
 
         <div class="flex items-center gap-2">

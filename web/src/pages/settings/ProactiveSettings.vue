@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { useConfig } from '@/composables/configContext'
 import NumberField from '@/components/NumberField.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import ToggleField from '@/components/ToggleField.vue'
+
+const PROACTIVE_LEVELS = [
+  { value: 'off', label: 'off · 不主动' },
+  { value: 'auto', label: 'auto · 攒够额度可开口' },
+]
 
 const { draft } = useConfig()
 </script>
@@ -13,10 +19,14 @@ const { draft } = useConfig()
             <h3 class="text-sm font-medium text-slate-200">自发主动</h3>
             <div class="flex items-center gap-2">
               <span class="text-xs text-slate-500">按群 opt-in，默认关</span>
-              <select v-model="draft.proactive_level" class="input input-sm mono">
-                <option value="off">off · 不主动</option>
-                <option value="auto">auto · 攒够额度可开口</option>
-              </select>
+              <div class="w-44">
+                <SelectMenu
+                  v-model="draft.proactive_level"
+                  size="sm"
+                  aria-label="自发主动档位 proactive_level"
+                  :options="PROACTIVE_LEVELS"
+                />
+              </div>
             </div>
           </div>
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">

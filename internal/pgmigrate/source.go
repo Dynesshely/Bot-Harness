@@ -75,6 +75,8 @@ var optionalTables = map[string]bool{
 	"affect_states":  true,
 	"affect_events":  true,
 	"affect_history": true,
+	"join_decisions": true,
+	"join_topics":    true,
 }
 
 // discover reads sqlite_master, applies TableOrder and loads every column.

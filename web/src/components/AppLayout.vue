@@ -22,6 +22,7 @@ const NAV: NavItem[] = [
   { name: 'messages', label: '消息记录', icon: 'mail' },
   { name: 'policies', label: '策略配置', icon: 'shield' },
   { name: 'affect', label: '情绪状态', icon: 'sparkles' },
+  { name: 'join', label: '自主加入', icon: 'users' },
   { name: 'tasks', label: '定时任务', icon: 'clock' },
   { name: 'memories', label: '长期记忆', icon: 'database' },
   { name: 'tools', label: '工具调用', icon: 'bolt' },

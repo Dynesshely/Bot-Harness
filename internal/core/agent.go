@@ -59,6 +59,10 @@ func (d *Dispatcher) agentTools(s settings.Settings, cfg settings.GroupConfig, i
 		case "exec":
 			// 开关 + 身份：执行命令只给管理员，非管理员连工具定义都不下发。
 			return s.ExecEnabled && cfg.ExecEnabled && admin
+		case "vision":
+			// 关闭视觉时连 view_image 都不声明；工具内部还会再检查一次，
+			// 防止模型被旧上下文诱导后自行调用。
+			return s.VisionEnabled
 		default:
 			return true
 		}

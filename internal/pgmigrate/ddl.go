@@ -108,6 +108,8 @@ var timestampColumns = map[string]bool{
 	"affect_states.paused_until":   true,
 	"affect_events.created_at":     true,
 	"affect_history.at":            true,
+	"join_decisions.created_at":    true,
+	"join_topics.analyzed_at":      true,
 }
 
 // nullableTimestampColumns are the timestamp columns whose SQLite value may be

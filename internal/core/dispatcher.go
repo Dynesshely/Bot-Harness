@@ -181,6 +181,14 @@ func New(opts Options) *Dispatcher {
 	d.tools.Register(tools.NewWebFetch(d.webConfig))
 	d.tools.Register(tools.NewWebSearch(d.webConfig))
 	d.tools.Register(tools.NewShell(d.execConfig))
+	// view_image 需要媒体缓存与 AI 客户端；vision_enabled 在调用时再判一次，
+	// 所以后台开关切换不需要重启，关闭时也不会向模型声明这个工具。
+	if d.media != nil && d.ai != nil {
+		d.tools.Register(tools.NewViewImage(d.media, d.ai, func() tools.VisionConfig {
+			s := d.settings.Effective()
+			return tools.VisionConfig{Enabled: s.VisionEnabled, Model: s.HumanStatusVisionModel, FallbackModel: s.Model}
+		}))
+	}
 
 	return d
 }
@@ -482,7 +490,8 @@ func (d *Dispatcher) DispatchMessage(ctx context.Context, p *qq.Payload, ev *qq.
 		MentionedBots: botMentions,
 		// The platform's own reference index for this message; the only value
 		// message_reference accepts when quoting somebody else's message.
-		QuoteIndex: ev.MessageScene.Get("msg_idx"),
+		QuoteIndex:  ev.MessageScene.Get("msg_idx"),
+		RefMsgIndex: ev.MessageScene.Get("ref_msg_idx"),
 	}
 	if in.Scene = "group"; p.T == qq.EventC2CMessageCreate {
 		in.Scene = "c2c"
@@ -503,20 +512,36 @@ func (d *Dispatcher) DispatchMessage(ctx context.Context, p *qq.Payload, ev *qq.
 	}
 
 	// 图片附件先落本地：平台 URL 的 rkey 会过期，只有缓存下来时间线才不会烂掉；
-	// 同时模型也能在**本轮**直接看到图片内容。
-	if d.media != nil && len(ev.Attachments) > 0 {
-		attachCtx, cancel := context.WithTimeout(bgctx, 20*time.Second)
-		in.Attachments = d.media.Ingest(attachCtx, ev.Attachments)
-		cancel()
+	// 同时模型也能在**本轮**直接看到当前消息的图片内容。引用/合并消息的附件
+	// 不在 ev.Attachments 里，必须单独展开 msg_elements，否则引用图永远进不了
+	// 缓存，下一轮模型也查不到它。
+	if d.media != nil {
+		current := ev.Attachments
+		quoted := ev.QuotedAttachments()
+		if len(current)+len(quoted) > 0 {
+			attachCtx, cancel := context.WithTimeout(bgctx, 20*time.Second)
+			in.Attachments, in.MediaRefs = d.ingestAttachments(attachCtx, current, quoted)
+			cancel()
+		}
 	}
 
 	if ev.Author.Bot {
+		// 机器人之间的策略只看平台级 @：引用识别是「人类引用机器人」的寻址信号，
+		// 不给另一个机器人开新的回话路径，避免多机器人互引成环。
 		d.dispatchBotMessage(bgctx, p, ev, in, s, addressedToBot)
 		return
 	}
 
 	// A human spoke: any bot-to-bot chain in this conversation is over.
 	d.resetBotChain(in)
+
+	// 引用机器人 = 被寻址。平台只给被引用消息的 ref_msg_idx，所以拿它去比对本群
+	// assistant 消息的 quote_index；命中就和 @ 一样走快路径（AtBot），并单独记
+	// ReplyToBot 便于解释「为什么这条未 @ 消息被回了」。识别失败 fail-open：
+	// 1s 超时、只 DEBUG，退回原来的未 @ 语义 —— 绝不能因为它拖慢或中断回复。
+	if in.Scene == "group" && !in.AtBot {
+		d.markReplyToBot(bgctx, in)
+	}
 
 	if in.GroupOpenID != "" && d.identity != nil {
 		// 顺带刷新（缓存 60 秒内不重复请求），权限变更无需等后台轮询。
@@ -600,10 +625,23 @@ func (d *Dispatcher) route(in *Inbound) {
 		return
 	}
 
+	// 自主加入：未 @ 的群消息先由 join gate 判断要不要开口。它排在 trigger gate
+	// 之前，所以 at_only 群里被判定加入的消息也能继续走回复管线；总开关关闭时
+	// 这个分支根本不执行，行为与 v0.2.0 完全一致。
+	joinedByGate := false
+	if in.Scene == "group" && !in.AtBot && cfg.JoinGateEnabled {
+		if !d.maybeJoinGroupChat(context.Background(), in, conv, cfg, s) {
+			d.observe(in, conv)
+			drop("join_gate")
+			return
+		}
+		joinedByGate = true
+	}
+
 	// Trigger gate. In full-group mode every message arrives as
 	// GROUP_MESSAGE_CREATE, so at_only must be decided from the mention list
 	// rather than from the event type alone.
-	if in.Scene == "group" && !in.AtBot && cfg.TriggerMode != settings.TriggerAllMessages {
+	if in.Scene == "group" && !in.AtBot && !joinedByGate && cfg.TriggerMode != settings.TriggerAllMessages {
 		// The bot can see the whole group in full-group mode. Keep what it
 		// witnessed so the conversation page is a complete timeline, but never
 		// feed it to the model and never answer it.
@@ -624,7 +662,8 @@ func (d *Dispatcher) route(in *Inbound) {
 	}
 
 	// 人味：没 @ 机器人的消息偶尔不接话。@ 了一定回，这里只处理「可以不接」的情况。
-	if in.Scene == "group" && !in.AtBot {
+	// join gate 已经明确决定加入的消息不再随机沉默。
+	if in.Scene == "group" && !in.AtBot && !joinedByGate {
 		level := humanizeLevel(s, cfg)
 		boost := 0.0
 		if d.affect != nil {

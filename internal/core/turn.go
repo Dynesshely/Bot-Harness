@@ -73,6 +73,13 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 		systemPrompt += "\n\n当前是群共享上下文：每条用户消息以「昵称：内容」的格式给出，你可以看到群里其他成员之前的发言。回复时直接回答最后一条消息即可，不要带昵称前缀。"
 	}
 
+	// 图片标注只进模型输入（本轮用户消息 + 历史消息），不写进落库的正文：
+	// 下一轮仍可依据 attachments 重建同样的标注。
+	modelUserText := annotateMediaRefs(userText, inboundMediaRefs(in))
+	if s.VisionEnabled && s.ToolsEnabled && cfg.ToolsEnabled && d.media != nil {
+		systemPrompt = appendSystemBlock(systemPrompt, visionSystemPrompt)
+	}
+
 	budget := s.ContextMaxTokens - s.MaxTokens
 	if budget < 256 {
 		budget = 256
@@ -93,11 +100,16 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	if block := d.affectBlock(ctx, conv.ID, s, cfg, time.Now()); block != "" {
 		systemPrompt = appendSystemBlock(systemPrompt, block)
 	}
-	messages := BuildChatMessages(systemPrompt, history, userText, budget)
+	// 话题背景只给「最近 15 分钟内分析过」的群，且明确标注仅作背景；
+	// 关闭 join gate 时连读库都不做，保证旧行为逐字节一致。
+	if block := d.joinTopicsBlock(ctx, conv, cfg); block != "" {
+		systemPrompt = appendSystemBlock(systemPrompt, block)
+	}
+	messages := BuildChatMessages(systemPrompt, annotateHistory(history), modelUserText, budget)
 
 	// 本轮消息带图时改用多模态输入。只对本轮生效：历史图片会显著推高 token
-	// 消耗，而绝大多数追问并不需要回看旧图。
-	if parts := d.visionParts(ctx, s, in); len(parts) > 0 {
+	// 消耗，而绝大多数追问并不需要回看旧图（需要时可以调用 view_image）。
+	if parts := d.visionParts(ctx, s, in, modelUserText); len(parts) > 0 {
 		last := len(messages) - 1
 		messages[last] = ai.Message{Role: ai.RoleUser, Parts: parts}
 		d.log.Info("sending an image to the model", "component", "ai",
@@ -121,7 +133,7 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	defer d.metrics.AIInFlight.Add(-1)
 
 	// converse 负责整轮：工具循环、多模态降级重试、以及只发一次的「让我想想」。
-	outcome, _ := d.converse(aiCtx, in, s, cfg, conv, messages, userText, hasVisionParts(messages))
+	outcome, _ := d.converse(aiCtx, in, s, cfg, conv, messages, modelUserText, hasVisionParts(messages))
 	result, err := outcome.result, outcome.err
 	if err != nil {
 		d.metrics.AIErrors.Add(1)
@@ -381,20 +393,22 @@ func hasVisionParts(messages []ai.Message) bool {
 
 // visionParts turns the current turn's cached images into multimodal content
 // parts, or returns nil when the turn has no usable image / vision is off.
-func (d *Dispatcher) visionParts(ctx context.Context, s settings.Settings, in *Inbound) []ai.ContentPart {
-	if !s.VisionEnabled || d.media == nil || len(in.Attachments) == 0 {
+// Quoted images are deliberately excluded: they stay addressable through
+// view_image, so a long quoted thread does not multiply this turn's tokens.
+func (d *Dispatcher) visionParts(ctx context.Context, s settings.Settings, in *Inbound, text string) []ai.ContentPart {
+	if !s.VisionEnabled || d.media == nil {
 		return nil
 	}
-	parts := []ai.ContentPart{ai.TextPart(in.Content)}
+	parts := []ai.ContentPart{ai.TextPart(text)}
 	images := 0
-	for _, a := range in.Attachments {
-		if a.Kind != "image" || a.MediaID == "" {
+	for _, ref := range inboundMediaRefs(in) {
+		if ref.Source != MediaSourceCurrent || ref.Kind != "image" || ref.MediaID == "" {
 			continue
 		}
 		if images >= s.VisionMaxImages {
 			break
 		}
-		contentType, data, err := d.media.Load(ctx, a.MediaID)
+		contentType, data, err := d.media.Load(ctx, ref.MediaID)
 		if err != nil || len(data) == 0 {
 			if err != nil {
 				d.log.Debug("failed to load a cached image", "component", "ai", "error", err.Error())

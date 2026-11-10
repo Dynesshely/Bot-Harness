@@ -72,7 +72,10 @@ type GroupOverride struct {
 	// AffectInjectMode 覆盖本群的注入档位（off/line/full，空 = 跟随全局）。
 	AffectInjectMode *string `json:"affect_inject_mode,omitempty"`
 	// Polish 覆盖本群的「两阶段生成」开关（nil = 跟随全局 polish_enabled）。
-	Polish            *bool `json:"polish,omitempty"`
+	Polish *bool `json:"polish,omitempty"`
+	// JoinGate 覆盖本群的「自主加入」开关（nil = 跟随全局 join_gate_enabled）。
+	// 全局关是总开关：群覆盖只能收窄，不能越过全局关打开。
+	JoinGate          *bool `json:"join_gate,omitempty"`
 	Web               *bool `json:"web,omitempty"`
 	Exec              *bool `json:"exec,omitempty"`
 	RateLimitGroupQPM int   `json:"rate_limit_group_qpm,omitempty"`
@@ -189,6 +192,40 @@ type Settings struct {
 	AffectTickSeconds int `json:"affect_tick_seconds"`
 	// AffectInjectMaxTokens caps the injected block (40-300 tokens).
 	AffectInjectMaxTokens int `json:"affect_inject_max_tokens"`
+
+	// --- 自主加入（join gate）---
+	//
+	// 默认关闭；关闭时回复管线与 v0.2.0 逐字节一致。开启后，未 @ 机器人的
+	// 群消息会先由一次轻量 LLM 调用判断「要不要加入」，同时顺带切分话题。
+	// 全局开关是总开关，群覆盖只能收窄。
+	JoinGateEnabled bool `json:"join_gate_enabled"`
+	// JoinGateMode is off / llm. off 与 join_gate_enabled=false 等效。
+	JoinGateMode string `json:"join_gate_mode"`
+	// JoinGateModel is the model used for the decision; empty = main model.
+	JoinGateModel string `json:"join_gate_model"`
+	// JoinGateWindow is how many recent group messages feed the decision (5-50).
+	JoinGateWindow int `json:"join_gate_window"`
+	// JoinGateConfidence is the minimum confidence required to join (0-1).
+	JoinGateConfidence float64 `json:"join_gate_confidence"`
+	// JoinGateEvalCooldownSeconds is the minimum gap between two evaluations of
+	// the same group (10-3600).
+	JoinGateEvalCooldownSeconds int `json:"join_gate_eval_cooldown_seconds"`
+	// JoinGateMinIntervalMinutes is the minimum gap between two joins (1-240).
+	JoinGateMinIntervalMinutes int `json:"join_gate_min_interval_minutes"`
+	// JoinGateMaxPerHour / JoinGateMaxPerDay cap joins per group.
+	JoinGateMaxPerHour int `json:"join_gate_max_per_hour"`
+	JoinGateMaxPerDay  int `json:"join_gate_max_per_day"`
+	// JoinGateWaitRetrySeconds is the early re-evaluation delay after a "wait"
+	// verdict (10-300): once the topic has had time to develop, the next message
+	// may skip the normal evaluation cooldown.
+	JoinGateWaitRetrySeconds int `json:"join_gate_wait_retry_seconds"`
+	// JoinGateTopicDormantMinutes / JoinGateTopicClosedMinutes age topics out by
+	// their newest message (5-240 / 30-1440). They are the code-side backstop for
+	// the model: a topic with no new message for dormant minutes is downgraded to
+	// dormant, and for closed minutes to closed. Downgrade only — age never
+	// revives a topic the model itself called closed.
+	JoinGateTopicDormantMinutes int `json:"join_gate_topic_dormant_minutes"`
+	JoinGateTopicClosedMinutes  int `json:"join_gate_topic_closed_minutes"`
 
 	// --- 接入与运维（原先只存在于 .env）---
 
@@ -369,10 +406,24 @@ func Defaults() Settings {
 		AffectEventClassifier: "rules",
 		AffectTickSeconds:     300,
 		AffectInjectMaxTokens: 120,
-		QQTransport:           "websocket",
-		QQIntents:             DefaultIntents,
-		QQShardCount:          1,
-		QQWebhookPath:         "/qq/webhook",
+		// 自主加入默认关：框架在，但不改变任何现有群的行为。
+		JoinGateEnabled:             false,
+		JoinGateMode:                "llm",
+		JoinGateModel:               "",
+		JoinGateWindow:              orInt(0, 20, 5, 50),
+		JoinGateConfidence:          0.7,
+		JoinGateEvalCooldownSeconds: orInt(0, 60, 10, 3600),
+		JoinGateMinIntervalMinutes:  orInt(0, 5, 1, 240),
+		JoinGateMaxPerHour:          orInt(0, 3, 1, 30),
+		JoinGateMaxPerDay:           orInt(0, 12, 1, 100),
+		JoinGateWaitRetrySeconds:    orInt(0, 30, 10, 300),
+		// 话题寿命兜底：20 分钟没新消息算「暂歇」，180 分钟算「已结束」。
+		JoinGateTopicDormantMinutes: orInt(0, 20, 5, 240),
+		JoinGateTopicClosedMinutes:  orInt(0, 180, 30, 1440),
+		QQTransport:                 "websocket",
+		QQIntents:                   DefaultIntents,
+		QQShardCount:                1,
+		QQWebhookPath:               "/qq/webhook",
 		// Loopback by default: the admin panel is a privileged surface, so a
 		// fresh install must not expose it on every interface. Operators who
 		// put it behind a reverse proxy set 0.0.0.0:8080 explicitly (the
@@ -797,6 +848,42 @@ func validateRanges(s *Settings) error {
 	if s.AffectInjectMaxTokens < 40 || s.AffectInjectMaxTokens > 300 {
 		problems = append(problems, "affect_inject_max_tokens must be within [40, 300]")
 	}
+	switch s.JoinGateMode {
+	case "", "off", "llm":
+	default:
+		problems = append(problems, "join_gate_mode must be off/llm")
+	}
+	if s.JoinGateWindow < 5 || s.JoinGateWindow > 50 {
+		problems = append(problems, "join_gate_window must be within [5, 50]")
+	}
+	if s.JoinGateConfidence < 0 || s.JoinGateConfidence > 1 {
+		problems = append(problems, "join_gate_confidence must be within [0, 1]")
+	}
+	if s.JoinGateEvalCooldownSeconds < 10 || s.JoinGateEvalCooldownSeconds > 3600 {
+		problems = append(problems, "join_gate_eval_cooldown_seconds must be within [10, 3600]")
+	}
+	if s.JoinGateMinIntervalMinutes < 1 || s.JoinGateMinIntervalMinutes > 240 {
+		problems = append(problems, "join_gate_min_interval_minutes must be within [1, 240]")
+	}
+	if s.JoinGateMaxPerHour < 1 || s.JoinGateMaxPerHour > 30 {
+		problems = append(problems, "join_gate_max_per_hour must be within [1, 30]")
+	}
+	if s.JoinGateMaxPerDay < 1 || s.JoinGateMaxPerDay > 100 {
+		problems = append(problems, "join_gate_max_per_day must be within [1, 100]")
+	}
+	if s.JoinGateWaitRetrySeconds < 10 || s.JoinGateWaitRetrySeconds > 300 {
+		problems = append(problems, "join_gate_wait_retry_seconds must be within [10, 300]")
+	}
+	if s.JoinGateTopicDormantMinutes < 5 || s.JoinGateTopicDormantMinutes > 240 {
+		problems = append(problems, "join_gate_topic_dormant_minutes must be within [5, 240]")
+	}
+	if s.JoinGateTopicClosedMinutes < 30 || s.JoinGateTopicClosedMinutes > 1440 {
+		problems = append(problems, "join_gate_topic_closed_minutes must be within [30, 1440]")
+	}
+	if s.JoinGateTopicClosedMinutes <= s.JoinGateTopicDormantMinutes {
+		// 否则 closed 会在 dormant 之前触发，两个档位就失去意义。
+		problems = append(problems, "join_gate_topic_closed_minutes must be greater than join_gate_topic_dormant_minutes")
+	}
 	switch s.HumanizeLevel {
 	case "", "off", "soft", "medium", "strong":
 	default:
@@ -946,11 +1033,14 @@ func (m *Manager) GroupConfig(groupOpenID string) GroupConfig {
 		AffectEnabled:    s.AffectEnabled,
 		AffectInjectMode: s.AffectInjectMode,
 		HumanizeLevel:    s.HumanizeLevel,
-		PolishEnabled:    s.PolishEnabled,
-		TasksEnabled:     s.TasksEnabled,
-		ProactiveLevel:   s.ProactiveLevel,
-		RateLimitGroup:   s.RateLimitGroupQPM,
-		Cooldown:         s.GroupCooldownSeconds,
+		// mode=off 与总开关关闭等效：两者都必须是可靠关闭，不能让
+		// 「enabled=true + mode=off」把未 @ 消息从正常管线里截走。
+		JoinGateEnabled: s.JoinGateEnabled && s.JoinGateMode != "off",
+		PolishEnabled:   s.PolishEnabled,
+		TasksEnabled:    s.TasksEnabled,
+		ProactiveLevel:  s.ProactiveLevel,
+		RateLimitGroup:  s.RateLimitGroupQPM,
+		Cooldown:        s.GroupCooldownSeconds,
 	}
 	for _, ov := range s.GroupOverrides {
 		if ov.GroupOpenID != groupOpenID {
@@ -998,6 +1088,11 @@ func (m *Manager) GroupConfig(groupOpenID string) GroupConfig {
 		if ov.AffectInjectMode != nil && *ov.AffectInjectMode != "" {
 			cfg.AffectInjectMode = *ov.AffectInjectMode
 		}
+		if ov.JoinGate != nil {
+			// 与 affect 相同的总开关语义：全局关时群覆盖打不开；
+			// 群 false 永远可以关闭。
+			cfg.JoinGateEnabled = s.JoinGateEnabled && *ov.JoinGate
+		}
 		if ov.Polish != nil {
 			cfg.PolishEnabled = *ov.Polish
 		}
@@ -1011,6 +1106,13 @@ func (m *Manager) GroupConfig(groupOpenID string) GroupConfig {
 			cfg.RateLimitGroup = ov.RateLimitGroupQPM
 		}
 		break
+	}
+	// join_gate_mode=off means the feature is not in the pipeline at all. Without
+	// this, enabled=true + mode=off would make maybeJoinGroupChat return false and
+	// the dispatcher would observe+drop every un-@ message instead of falling
+	// back to the legacy trigger gate.
+	if s.JoinGateMode == "off" {
+		cfg.JoinGateEnabled = false
 	}
 	return cfg
 }
@@ -1031,7 +1133,10 @@ type GroupConfig struct {
 	// group (global defaults, overridable per group).
 	AffectEnabled    bool
 	AffectInjectMode string
-	HumanizeLevel    string
+	// JoinGateEnabled is the resolved 自主加入 switch for this group. The global
+	// join_gate_enabled is a master kill switch; a group override can only narrow.
+	JoinGateEnabled bool
+	HumanizeLevel   string
 	// PolishEnabled is the resolved two-stage switch for this group.
 	PolishEnabled  bool
 	TasksEnabled   bool
@@ -1047,6 +1152,11 @@ func normalize(s *Settings) {
 	s.OpenAIBaseURL = strings.TrimRight(strings.TrimSpace(s.OpenAIBaseURL), "/")
 	s.OpenAIAPIKey = strings.TrimSpace(s.OpenAIAPIKey)
 	s.PolishModel = strings.TrimSpace(s.PolishModel)
+	s.JoinGateModel = strings.TrimSpace(s.JoinGateModel)
+	if s.JoinGateMode == "" {
+		// 缺省档位是 llm；off 只能由显式配置或总开关给出。
+		s.JoinGateMode = "llm"
+	}
 	if s.ContextScope == "" {
 		s.ContextScope = ContextAddressedOnly
 	}
@@ -1235,6 +1345,45 @@ func applyKey(dst *Settings, key string, raw json.RawMessage) error {
 		return json.Unmarshal(raw, &dst.AffectTickSeconds)
 	case "affect_inject_max_tokens":
 		return json.Unmarshal(raw, &dst.AffectInjectMaxTokens)
+	case "join_gate_enabled":
+		return json.Unmarshal(raw, &dst.JoinGateEnabled)
+	case "join_gate_mode":
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return err
+		}
+		v = strings.ToLower(strings.TrimSpace(v))
+		switch v {
+		case "off", "llm":
+			dst.JoinGateMode = v
+			return nil
+		}
+		return fmt.Errorf("join_gate_mode must be off/llm")
+	case "join_gate_model":
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return err
+		}
+		dst.JoinGateModel = strings.TrimSpace(v)
+		return nil
+	case "join_gate_window":
+		return json.Unmarshal(raw, &dst.JoinGateWindow)
+	case "join_gate_confidence":
+		return json.Unmarshal(raw, &dst.JoinGateConfidence)
+	case "join_gate_eval_cooldown_seconds":
+		return json.Unmarshal(raw, &dst.JoinGateEvalCooldownSeconds)
+	case "join_gate_min_interval_minutes":
+		return json.Unmarshal(raw, &dst.JoinGateMinIntervalMinutes)
+	case "join_gate_max_per_hour":
+		return json.Unmarshal(raw, &dst.JoinGateMaxPerHour)
+	case "join_gate_max_per_day":
+		return json.Unmarshal(raw, &dst.JoinGateMaxPerDay)
+	case "join_gate_wait_retry_seconds":
+		return json.Unmarshal(raw, &dst.JoinGateWaitRetrySeconds)
+	case "join_gate_topic_dormant_minutes":
+		return json.Unmarshal(raw, &dst.JoinGateTopicDormantMinutes)
+	case "join_gate_topic_closed_minutes":
+		return json.Unmarshal(raw, &dst.JoinGateTopicClosedMinutes)
 	case "humanize_level":
 		var level string
 		if err := json.Unmarshal(raw, &level); err != nil {
@@ -1436,6 +1585,7 @@ func overrideIsEmpty(ov GroupOverride) bool {
 		ov.Affect == nil &&
 		ov.AffectInjectMode == nil &&
 		ov.Polish == nil &&
+		ov.JoinGate == nil &&
 		ov.Web == nil &&
 		ov.Exec == nil &&
 		ov.RateLimitGroupQPM == 0

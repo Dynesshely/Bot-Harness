@@ -248,8 +248,8 @@ func freshDatabase(t *testing.T, dsn string) string {
 }
 
 func TestTableOrderCoversEveryTable(t *testing.T) {
-	if len(TableOrder) != 17 {
-		t.Fatalf("TableOrder has %d tables, want 17", len(TableOrder))
+	if len(TableOrder) != 19 {
+		t.Fatalf("TableOrder has %d tables, want 19", len(TableOrder))
 	}
 	seen := map[string]bool{}
 	for _, name := range TableOrder {
@@ -267,6 +267,15 @@ func TestTableOrderCoversEveryTable(t *testing.T) {
 	}
 	for _, before := range []string{"settings", "conversations"} {
 		for _, after := range []string{"messages", "records", "scheduled_tasks", "commitments", "human_status", "memories", "media"} {
+			if pos[before] > pos[after] {
+				t.Fatalf("%s must be copied before %s", before, after)
+			}
+		}
+	}
+	// The join-gate tables were added after the affect work and must stay after
+	// the tables whose rows they reference indirectly.
+	for _, before := range []string{"human_status", "affect_states", "affect_events", "affect_history"} {
+		for _, after := range []string{"join_decisions", "join_topics"} {
 			if pos[before] > pos[after] {
 				t.Fatalf("%s must be copied before %s", before, after)
 			}

@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { useConfig } from '@/composables/configContext'
 import NumberField from '@/components/NumberField.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import TextField from '@/components/TextField.vue'
 import ToggleField from '@/components/ToggleField.vue'
+
+const HUMANIZE_LEVELS = [
+  { value: 'off', label: 'off · 立即回复' },
+  { value: 'soft', label: 'soft · 轻微停顿' },
+  { value: 'medium', label: 'medium · 中等（默认）' },
+  { value: 'strong', label: 'strong · 更慢、更爱沉默' },
+]
 
 const { draft } = useConfig()
 </script>
@@ -15,19 +23,13 @@ const { draft } = useConfig()
             <span class="text-xs text-slate-500">回复节奏与说话方式</span>
           </div>
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <div>
-              <label class="label" for="cfg-humanize">档位 humanize_level</label>
-              <select id="cfg-humanize" v-model="draft.humanize_level" class="input mono">
-                <option value="off">off · 立即回复</option>
-                <option value="soft">soft · 轻微停顿</option>
-                <option value="medium">medium · 中等（默认）</option>
-                <option value="strong">strong · 更慢、更爱沉默</option>
-              </select>
-              <p class="field-hint">
-                中等档：基础 0.8s + 每 10 字 0.6s（上限 8s），分段间隔约 0.65s，
-                未 @ 时 10% 概率不插话。
-              </p>
-            </div>
+            <SelectMenu
+              id="cfg-humanize"
+              v-model="draft.humanize_level"
+              label="档位 humanize_level"
+              :options="HUMANIZE_LEVELS"
+              hint="中等档：基础 0.8s + 每 10 字 0.6s（上限 8s），分段间隔约 0.65s，未 @ 时 10% 概率不插话。"
+            />
             <NumberField
               v-model="draft.humanize_delay_scale"
               label="停顿倍数 humanize_delay_scale"

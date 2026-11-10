@@ -62,6 +62,18 @@ type Metrics struct {
 	AffectInjections  atomic.Int64
 	AffectInjectChars atomic.Int64
 	AffectErrors      atomic.Int64
+
+	// Join-gate counters: evals counts gate model calls, joins counts the ones
+	// that decided to speak, skips counts every non-join outcome (cheap gates
+	// included), waits counts the "wait and look again" verdicts (they are also
+	// skips, so the two overlap on purpose), errors counts failures (they are
+	// also fail-closed), topics counts saved topic splits.
+	JoinGateEvals  atomic.Int64
+	JoinGateJoins  atomic.Int64
+	JoinGateSkips  atomic.Int64
+	JoinGateWaits  atomic.Int64
+	JoinGateErrors atomic.Int64
+	JoinGateTopics atomic.Int64
 }
 
 // CounterSnapshot is the JSON shape of Metrics.
@@ -90,6 +102,12 @@ type CounterSnapshot struct {
 	AffectInjections      int64 `json:"affect_injections"`
 	AffectInjectChars     int64 `json:"affect_inject_chars"`
 	AffectErrors          int64 `json:"affect_errors"`
+	JoinGateEvals         int64 `json:"join_gate_evals"`
+	JoinGateJoins         int64 `json:"join_gate_joins"`
+	JoinGateSkips         int64 `json:"join_gate_skips"`
+	JoinGateWaits         int64 `json:"join_gate_waits"`
+	JoinGateErrors        int64 `json:"join_gate_errors"`
+	JoinGateTopics        int64 `json:"join_gate_topics"`
 }
 
 // Snapshot returns the current counter values.
@@ -119,6 +137,12 @@ func (m *Metrics) Snapshot() CounterSnapshot {
 		AffectInjections:      m.AffectInjections.Load(),
 		AffectInjectChars:     m.AffectInjectChars.Load(),
 		AffectErrors:          m.AffectErrors.Load(),
+		JoinGateEvals:         m.JoinGateEvals.Load(),
+		JoinGateJoins:         m.JoinGateJoins.Load(),
+		JoinGateSkips:         m.JoinGateSkips.Load(),
+		JoinGateWaits:         m.JoinGateWaits.Load(),
+		JoinGateErrors:        m.JoinGateErrors.Load(),
+		JoinGateTopics:        m.JoinGateTopics.Load(),
 	}
 }
 

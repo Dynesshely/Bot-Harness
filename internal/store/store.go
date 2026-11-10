@@ -185,6 +185,7 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id);
+CREATE INDEX IF NOT EXISTS idx_messages_quote_index ON messages(quote_index);
 
 CREATE TABLE IF NOT EXISTS records (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -332,6 +333,31 @@ CREATE TABLE IF NOT EXISTS affect_history (
 );
 CREATE INDEX IF NOT EXISTS idx_affect_history_conversation ON affect_history(conversation_id, at DESC);
 
+CREATE TABLE IF NOT EXISTS join_decisions (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_openid    TEXT NOT NULL DEFAULT '',
+  conversation_id TEXT NOT NULL DEFAULT '',
+  message_id      TEXT NOT NULL DEFAULT '',
+  speaker         TEXT NOT NULL DEFAULT '',
+  preview         TEXT NOT NULL DEFAULT '',
+  joined          INTEGER NOT NULL DEFAULT 0,
+  action          TEXT NOT NULL DEFAULT '',
+  confidence      REAL NOT NULL DEFAULT 0,
+  reason          TEXT NOT NULL DEFAULT '',
+  topics          TEXT NOT NULL DEFAULT '',
+  model           TEXT NOT NULL DEFAULT '',
+  latency_ms      INTEGER NOT NULL DEFAULT 0,
+  created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_join_decisions_group ON join_decisions(group_openid, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_join_decisions_conversation ON join_decisions(conversation_id);
+
+CREATE TABLE IF NOT EXISTS join_topics (
+  group_openid TEXT PRIMARY KEY,
+  topics       TEXT NOT NULL DEFAULT '',
+  analyzed_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS dedup (
   msg_id     TEXT PRIMARY KEY,
   created_at TEXT NOT NULL
@@ -399,6 +425,7 @@ func (s *Store) runMigrations(ctx context.Context) error {
 		{"0011_commitments", s.migrationCommitments},
 		{"0012_human_status", s.migrationHumanStatus},
 		{"0013_affect", s.migrationAffect},
+		{"0014_join_gate", s.migrationJoinGate},
 	}
 	for _, m := range migrations {
 		var applied int
@@ -946,6 +973,11 @@ func (s *Store) ClearConversationMessages(ctx context.Context, id string) error 
 	if err := s.ClearAffectForConversation(ctx, id); err != nil {
 		return err
 	}
+	// Join decisions are conversation-scoped audit rows. The group topic cache is
+	// group-scoped and is left to ClearAllJoin (see ClearJoinForConversation).
+	if err := s.ClearJoinForConversation(ctx, id); err != nil {
+		return err
+	}
 	_, err := s.execContext(ctx, `
 UPDATE conversations SET message_count = 0, turn_count = 0, token_estimate = 0 WHERE id = ?`, id)
 	return err
@@ -957,6 +989,9 @@ func (s *Store) ClearAllConversations(ctx context.Context) error {
 		return err
 	}
 	if err := s.ClearAllAffect(ctx); err != nil {
+		return err
+	}
+	if err := s.ClearAllJoin(ctx); err != nil {
 		return err
 	}
 	_, err := s.execContext(ctx, `DELETE FROM conversations`)
@@ -1676,6 +1711,55 @@ CREATE INDEX IF NOT EXISTS idx_affect_history_conversation ON affect_history(con
 `)
 	if err != nil {
 		return fmt.Errorf("create affect tables: %w", err)
+	}
+	return nil
+}
+
+// migrationJoinGate creates the join-gate tables on databases that predate
+// them. The base schema already creates them for a fresh database; this
+// migration is what makes an upgrade work, and it is idempotent because
+// CREATE ... IF NOT EXISTS never touches an existing table.
+func (s *Store) migrationJoinGate(ctx context.Context) error {
+	_, err := s.execContext(ctx, `
+CREATE TABLE IF NOT EXISTS join_decisions (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_openid    TEXT NOT NULL DEFAULT '',
+  conversation_id TEXT NOT NULL DEFAULT '',
+  message_id      TEXT NOT NULL DEFAULT '',
+  speaker         TEXT NOT NULL DEFAULT '',
+  preview         TEXT NOT NULL DEFAULT '',
+  joined          INTEGER NOT NULL DEFAULT 0,
+  action          TEXT NOT NULL DEFAULT '',
+  confidence      REAL NOT NULL DEFAULT 0,
+  reason          TEXT NOT NULL DEFAULT '',
+  topics          TEXT NOT NULL DEFAULT '',
+  model           TEXT NOT NULL DEFAULT '',
+  latency_ms      INTEGER NOT NULL DEFAULT 0,
+  created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_join_decisions_group ON join_decisions(group_openid, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_join_decisions_conversation ON join_decisions(conversation_id);
+CREATE TABLE IF NOT EXISTS join_topics (
+  group_openid TEXT PRIMARY KEY,
+  topics       TEXT NOT NULL DEFAULT '',
+  analyzed_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_messages_quote_index ON messages(quote_index);
+`)
+	if err != nil {
+		return fmt.Errorf("create join_gate tables: %w", err)
+	}
+	// A database that already ran an earlier build of this migration has the
+	// table but not the column: CREATE TABLE IF NOT EXISTS does nothing there.
+	have, err := s.tableColumns(ctx, "join_decisions")
+	if err != nil {
+		return err
+	}
+	if !have["action"] {
+		if _, err := s.execContext(ctx,
+			`ALTER TABLE join_decisions ADD COLUMN action TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add join_decisions.action: %w", err)
+		}
 	}
 	return nil
 }

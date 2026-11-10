@@ -2,8 +2,15 @@
 import { useConfig } from '@/composables/configContext'
 import AppIcon from '@/components/AppIcon.vue'
 import NumberField from '@/components/NumberField.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import TextField from '@/components/TextField.vue'
 import ToggleField from '@/components/ToggleField.vue'
+
+/** 搜索后端：空串 = 不启用搜索（与后端的空值语义一致）。 */
+const SEARCH_PROVIDERS = [
+  { value: '', label: '（不启用搜索）' },
+  { value: 'searxng', label: 'searxng' },
+]
 
 const { draft } = useConfig()
 </script>
@@ -62,14 +69,13 @@ const { draft } = useConfig()
             </div>
           </div>
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <div>
-              <label class="label" for="cfg-search-provider">搜索后端 web_search_provider</label>
-              <select id="cfg-search-provider" v-model="draft.web_search_provider" class="input mono">
-                <option value="">（不启用搜索）</option>
-                <option value="searxng">searxng</option>
-              </select>
-              <p class="field-hint">只影响 web_search；web_fetch 只依赖「联网」开关。</p>
-            </div>
+            <SelectMenu
+              id="cfg-search-provider"
+              v-model="draft.web_search_provider"
+              label="搜索后端 web_search_provider"
+              :options="SEARCH_PROVIDERS"
+              hint="只影响 web_search；web_fetch 只依赖「联网」开关。"
+            />
             <div class="sm:col-span-2">
               <label class="label" for="cfg-search-url">搜索服务地址 web_search_base_url</label>
               <input
@@ -258,6 +264,56 @@ const { draft } = useConfig()
             触发条数越小越灵敏，但会多消耗模型调用；缓存有效期越长越省，状态也越可能过时。
             时间线条数决定推测时能看到多少条近期消息；关闭「允许图片分析」后，视觉模型输入框会被禁用，
             模型也不会自主调用图片分析工具。
+          </p>
+        </div>
+
+        <!-- 自主加入：默认关；详细配置、群选择与决策记录在独立页面 -->
+        <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 class="flex items-center gap-2 text-sm font-medium text-slate-200">
+              自主加入
+              <span
+                class="badge"
+                :class="
+                  draft.join_gate_enabled
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                    : 'border-slate-700 bg-slate-800/60 text-slate-400'
+                "
+              >
+                {{ draft.join_gate_enabled ? '已启用' : '默认关闭' }}
+              </span>
+            </h3>
+            <RouterLink :to="{ name: 'join' }" class="btn btn-sm">
+              前往自主加入页
+              <AppIcon name="chevronRight" :size="14" />
+            </RouterLink>
+          </div>
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <ToggleField
+              v-model="draft.join_gate_enabled"
+              label="启用 join_gate_enabled"
+              hint="未 @ 机器人的群消息交给模型判断要不要加入"
+            />
+            <div>
+              <p class="label">模式 join_gate_mode</p>
+              <p class="text-sm text-slate-200">{{ draft.join_gate_mode }}</p>
+              <p class="field-hint">llm 由模型判断 / off 只记录不评估</p>
+            </div>
+            <div>
+              <p class="label">窗口 join_gate_window</p>
+              <p class="text-sm text-slate-200">{{ draft.join_gate_window }} 条</p>
+              <p class="field-hint">评估时取最近多少条群消息</p>
+            </div>
+            <div>
+              <p class="label">置信度 join_gate_confidence</p>
+              <p class="text-sm text-slate-200">{{ draft.join_gate_confidence }}</p>
+              <p class="field-hint">低于该值不加入，默认 0.7</p>
+            </div>
+          </div>
+          <p class="field-hint mt-2">
+            <b>默认关闭</b>；开启后每次评估最多调用一次模型（有评估冷却与每小时/每天加入上限）。
+            按群覆盖在「策略配置」里（join_gate 列），配置、群选择与最近决策都在
+            <RouterLink :to="{ name: 'join' }" class="link">自主加入</RouterLink> 页。
           </p>
         </div>
   </div>

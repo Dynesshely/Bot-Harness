@@ -2,12 +2,13 @@
 import { onMounted, ref } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import { commitmentsApi, proactiveApi, tasksApi, toMessage } from '@/api'
 import type { CommitmentItem, ProactiveOverview, TaskItem } from '@/api/types'
 import { toast } from '@/composables/useToast'
 import { formatDateTime } from '@/utils/format'
 
-const STATUSES = [
+const STATUSES: { value: string; label: string }[] = [
   { value: '', label: '全部状态' },
   { value: 'pending', label: '待发送' },
   { value: 'sent', label: '已发送' },
@@ -245,9 +246,16 @@ function destination(t: TaskItem) {
           定时任务
         </h2>
         <div class="flex items-center gap-2">
-          <select v-model="status" class="input input-sm" @change="load">
-            <option v-for="s in STATUSES" :key="s.value" :value="s.value">{{ s.label }}</option>
-          </select>
+          <div class="w-40">
+            <SelectMenu
+              v-model="status"
+              size="sm"
+              aria-label="按状态筛选定时任务"
+              placeholder="全部状态"
+              :options="STATUSES"
+              @change="load"
+            />
+          </div>
           <button type="button" class="btn btn-ghost btn-sm" :disabled="loading" @click="load">
             <AppIcon name="refresh" :size="14" :class="loading ? 'animate-spin' : ''" />
             刷新

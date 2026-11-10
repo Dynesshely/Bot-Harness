@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import SelectMenu from '@/components/SelectMenu.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { isAbortError, logsApi, toMessage } from '@/api'
 import type { LogItem, LogLevel } from '@/api/types'
@@ -148,12 +149,7 @@ function prettyFields(fields?: Record<string, unknown> | null): string {
     <section class="shrink-0 card">
       <div class="card-body flex flex-wrap items-end gap-3">
         <div class="w-40">
-          <label class="label" for="log-level">级别</label>
-          <select id="log-level" v-model="level" class="input">
-            <option v-for="item in LEVELS" :key="item.value" :value="item.value">
-              {{ item.label }}
-            </option>
-          </select>
+          <SelectMenu id="log-level" v-model="level" label="级别" :options="LEVELS" />
         </div>
 
         <div class="min-w-[14rem] flex-1">

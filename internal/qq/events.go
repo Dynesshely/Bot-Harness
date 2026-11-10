@@ -123,6 +123,31 @@ type MessageEvent struct {
 	MsgElements  []MsgElement        `json:"msg_elements"`
 }
 
+// QuotedAttachments flattens the attachments carried by msg_elements, the
+// payload of quoted and merged messages. The platform does not put those
+// attachments in the top-level Attachments field, so without this walk a
+// quoted image would never be cached (and the model could never look at it).
+//
+// Nested msg_elements are walked depth-first: a merged forward carries the
+// quoted messages inside the element list of the forward itself.
+func (e *MessageEvent) QuotedAttachments() []MessageAttachment {
+	if e == nil || len(e.MsgElements) == 0 {
+		return nil
+	}
+	var out []MessageAttachment
+	var walk func([]MsgElement)
+	walk = func(elements []MsgElement) {
+		for _, el := range elements {
+			out = append(out, el.Attachments...)
+			if len(el.MsgElements) > 0 {
+				walk(el.MsgElements)
+			}
+		}
+	}
+	walk(e.MsgElements)
+	return out
+}
+
 // mentionMarkup matches the "<@OPENID>"/"<@!OPENID>" tokens QQ leaves in the
 // content of full-group messages. The platform only strips the @bot prefix for
 // GROUP_AT_MESSAGE_CREATE, so these must be removed here or the model ends up

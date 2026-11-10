@@ -50,11 +50,12 @@ bot-harness migrate --from /data/bot.db --to 'postgres://bot:<口令>@postgres:5
 ```
 schema_migrations → settings → conversations → dedup → stats → proactive_state
 → messages → records → tool_calls → scheduled_tasks → commitments → human_status
-→ affect_states → affect_events → affect_history → memories → media
+→ affect_states → affect_events → affect_history → join_decisions → join_topics
+→ memories → media
 ```
 
-原有的十一张表顺序**原样保留**，新表 `commitments` / `human_status` / `affect_*`
-插在 `scheduled_tasks` 与 `memories` 之间，`media` 仍然最后。
+原有的十一张表顺序**原样保留**，新表 `commitments` / `human_status` / `affect_*` /
+`join_*` 插在 `scheduled_tasks` 与 `memories` 之间，`media` 仍然最后。
 `schema_migrations` 排在最前，因为它记录源库已应用的迁移。
 media 压尾是刻意的：44 MiB 的 BLOB 是唯一昂贵的表，失败时不该让便宜的表先搬完再卡在它上面。
 
@@ -130,6 +131,39 @@ media 压尾是刻意的：44 MiB 的 BLOB 是唯一昂贵的表，失败时不�
   必须仍然只有一条唯一约束）。
 - `media.size` 用 `BIGINT`（与 store 的写法一致），其余整数列 `INTEGER`。
   这条是唯一的按列覆盖，写在 `columnTypeOverrides` 里，不影响动态列发现。
+- **join_gate v2 的两处增量**（`join_decisions.action` 与 `messages(quote_index)` 索引）：
+
+  | 对象 | 类型 / 定义 | 说明 |
+  |---|---|---|
+  | `join_decisions.action` | `TEXT NOT NULL DEFAULT ''` | 三分类 `join` / `wait` / `skip`；**有默认值**，所以老版本 INSERT 省略该列仍然可用（代价是把 `action` 读成 `''`，UI 按 `joined` 回退） |
+  | `idx_messages_quote_index` | `CREATE INDEX IF NOT EXISTS … ON messages(quote_index)` | 引用机器人识别要按 `group_openid + quote_index` 反查 assistant 消息；v2 之前 SQLite 只在 base schema 里建了列、PG 连索引都没有 |
+
+  - `action` 在 `pgSchema` 的 `CREATE TABLE IF NOT EXISTS join_decisions` 里直接建；
+    `quote_index` 的列本身来自迁移 `0008_messages_quote_index`（PG 侧已 baseline，列在
+    `pgSchema` 的 `messages` 定义里），**v2 新增的只是索引**。
+  - 迁移器（`internal/pgmigrate`）**按源库实际列与索引动态发现**，所以 SQLite 老库没有
+    `action`、或没有该索引时，它照样能搬：列清单取自源库 `PRAGMA`，索引取自
+    `index_list/index_xinfo`。若源库是 v2 之后建的，目标库会一并得到列与索引。
+  - **索引自动补**：`pgSchema` 每次打开库都会执行（`CREATE TABLE IF NOT EXISTS` +
+    `CREATE INDEX IF NOT EXISTS`），所以已有的 PG 库在下次启动时就会得到
+    `idx_messages_quote_index`，**不需要手工建索引**。
+  - **列不会自动补**：`CREATE TABLE IF NOT EXISTS` 不会给已存在的表加列，PG 的
+    `0014_join_gate` 又是 baseline（不执行 `ALTER`，见 `baselineMigrations`）。
+    因此一个**用 v1 构建建过 `join_decisions` 的 PG 库**（0.3.0 尚未发布，只有在本分支
+    的早期构建上跑过才会遇到），升级到 v2 代码后缺少 `action` 列，需要一次性执行：
+
+    ```sql
+    ALTER TABLE join_decisions ADD COLUMN IF NOT EXISTS action TEXT NOT NULL DEFAULT '';
+    ```
+
+    什么时候必须做：`migrate` 的 `EnsureSchema` 对**已存在的目标表**只补二级对象、
+    不补列，并且源表有而目标缺列时会**硬失败**（`refusing to migrate into a narrower
+    schema`，见 `internal/pgmigrate/target.go`）。所以「v2 的 SQLite → v1 建过的 PG」
+    这条路径必须先跑上面的 `ALTER`，否则整次搬运会被拒绝。
+    不需要做的：全新建的 PG 库（`pgSchema` 直接带 `action`）与由 v2 源库经 `migrate`
+    建出来的库（建表 DDL 取自源库列清单）。
+    > 这是 v2 的**已知待办**：SQLite 侧 `migrationJoinGate` 已经用 `tableColumns` 做
+    > 幂等补列，PG 侧目前没有等价逻辑；在 `migratePostgres` 里补上之后，本段手工 SQL 应删掉。
 
 **源表已存在时**：只补齐缺失的二级对象（`CREATE INDEX IF NOT EXISTS`，
 UNIQUE 约束先查 `pg_constraint`，**按本工具自己算出的名字**查），不重建表、不改列——

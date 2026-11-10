@@ -12,6 +12,8 @@ import type {
   ConversationMessagesQuery,
   ConversationQuery,
   EditableConfig,
+  JoinDecisionsData,
+  JoinTopicsData,
   LogItem,
   LogList,
   LogQuery,
@@ -271,6 +273,20 @@ export const groupsApi = {
       signal,
     })
   },
+  /**
+   * 批量取群名（GET /api/groups/names?openids=a,b,c）。
+   *
+   * 后端最多接受 100 个 openid，查不到的群不会出现在返回里；
+   * 调用方必须自己兜底成 openid —— 群名只是展示优化，不能让它决定页面能不能用。
+   */
+  names(openids: string[], signal?: AbortSignal): Promise<Record<string, string>> {
+    const unique = Array.from(new Set(openids.map((id) => id.trim()).filter(Boolean)))
+    if (unique.length === 0) return Promise.resolve({})
+    return request<{ names?: Record<string, string> }>('/groups/names', {
+      query: { openids: unique.join(',') },
+      signal,
+    }).then((data) => (data && typeof data.names === 'object' && data.names ? data.names : {}))
+  },
 }
 
 /* ------------------------------------------------------------------ *
@@ -354,6 +370,30 @@ export const commitmentsApi = {
    */
   cancel(id: number): Promise<{ canceled: boolean }> {
     return request<{ canceled: boolean }>(`/commitments/${id}`, { method: 'DELETE' })
+  },
+}
+
+/* ------------------------------------------------------------------ *
+ * 自主加入（join_gate）
+ * ------------------------------------------------------------------ */
+
+export const joinApi = {
+  /**
+   * 最近加入决策。groupOpenid 为空 = 查全部群；limit 限 1–200。
+   * 后端未配置存储时返回 503，页面按 toMessage 展示即可。
+   */
+  decisions(groupOpenid = '', limit = 50, signal?: AbortSignal): Promise<JoinDecisionsData['decisions']> {
+    return request<JoinDecisionsData>('/join/decisions', {
+      query: { group_openid: groupOpenid, limit },
+      signal,
+    }).then((data) => (Array.isArray(data?.decisions) ? data.decisions : []))
+  },
+  /** 某个群最近一次话题分析；没有分析结果时后端返回 topics=null。 */
+  topics(groupOpenid: string, signal?: AbortSignal): Promise<JoinTopicsData['topics']> {
+    return request<JoinTopicsData>('/join/topics', {
+      query: { group_openid: groupOpenid },
+      signal,
+    }).then((data) => data?.topics ?? null)
   },
 }
 

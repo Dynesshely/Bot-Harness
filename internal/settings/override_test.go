@@ -9,7 +9,7 @@ import (
 
 // groupOverrideFieldCount is the number of JSON fields on GroupOverride. Bumping
 // it is a reminder to extend overrideIsEmpty (and the manifest) as well.
-const groupOverrideFieldCount = 18
+const groupOverrideFieldCount = 19
 
 func boolPtr(v bool) *bool { return &v }
 
@@ -44,6 +44,7 @@ func TestOverrideIsEmptyCoversEveryGroupOverrideField(t *testing.T) {
 		{"affect", GroupOverride{Affect: boolPtr(false)}},
 		{"affect_inject_mode", GroupOverride{AffectInjectMode: strPtr("full")}},
 		{"polish", GroupOverride{Polish: boolPtr(false)}},
+		{"join_gate", GroupOverride{JoinGate: boolPtr(false)}},
 		{"web", GroupOverride{Web: boolPtr(false)}},
 		{"exec", GroupOverride{Exec: boolPtr(true)}},
 		{"rate_limit_group_qpm", GroupOverride{RateLimitGroupQPM: 11}},
@@ -170,7 +171,7 @@ func TestPerGroupLevelsAreValidated(t *testing.T) {
 	}
 }
 
-// Apply 一份带全部 17 个字段的按群覆盖，读出来必须一个都不少（前端配置面完整性）。
+// Apply 一份带全部 19 个字段的按群覆盖，读出来必须一个都不少（前端配置面完整性）。
 func TestGroupOverrideRoundTripsAllFields(t *testing.T) {
 	m, st := newManager(t, false)
 	ctx := context.Background()
@@ -190,6 +191,7 @@ func TestGroupOverrideRoundTripsAllFields(t *testing.T) {
 		"affect":false,
 		"affect_inject_mode":"full",
 		"polish":false,
+		"join_gate":false,
 		"web":false,
 		"exec":true,
 		"rate_limit_group_qpm":11
@@ -236,7 +238,7 @@ func TestGroupOverrideRoundTripsAllFields(t *testing.T) {
 	}
 	check(t, got[0])
 
-	// 落库再读回：18 个字段都得在。
+	// 落库再读回：19 个字段都得在。
 	reloaded, err := New(ctx, st, Defaults())
 	if err != nil {
 		t.Fatalf("reload: %v", err)
