@@ -312,9 +312,8 @@ func truncateTokens(s string, max int) string {
 	if max <= 0 || approxTokens(s) <= max {
 		return s
 	}
-	runes := []rune(s)
 	var b strings.Builder
-	for _, r := range runes {
+	for _, r := range s {
 		candidate := b.String() + string(r)
 		if approxTokens(candidate) > max {
 			break
