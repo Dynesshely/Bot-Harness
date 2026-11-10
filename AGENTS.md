@@ -14,6 +14,7 @@ QQ 群 / 私聊 AI 机器人：单个 Go 二进制，内嵌 Vue 3 管理后台�
 |---|---|
 | `cmd/bot-harness/` | 入口、装配；`migrate` / `token` 子命令 |
 | `internal/core/` | dispatcher（路由/策略）、turn、reply、agent（工具循环）、**polish**（两阶段生成的 stage 2）、**commands**（聊天命令）、**command_panel**、memory、proactive、tasks、commitments、humanize、human_status |
+| `internal/affect/` | 情绪状态框架：tick 演化、事件分类门、注入与消毒、行为层、内置 `daily` 内容包 |
 | `internal/qq/` | 平台 API、WS 网关、发送器、`panels`（指令面板封装） |
 | `internal/ai/` | OpenAI 协议客户端（含 tools / tool_calls、多模态） |
 | `internal/tools/` | 工具注册表、内置工具、SSRF 防线、容器内执行 |
@@ -154,6 +155,18 @@ bash scripts/restore-pg.sh ~/bot-harness-backups/bot-<UTC 时间戳>            
     逐 rune 用 `GlyphIndex != 0` 选 face。测量与绘制必须走同一套 rune-aware 逻辑
     （`fontChain.measure` / `fontChain.draw`）。彩色 emoji 不支持（x/image 只光栅化轮廓），
     ZWJ 序列不做塑形。新增字体 = 同字号、同基线、补 sha256 与覆盖范围。
+20. **情绪状态是表达层，不是用户画像**（`internal/affect` + `docs/AFFECT.md`）：
+    默认 `affect_enabled=false`；按群覆盖 `group_overrides[].affect` / `affect_inject_mode`。
+    **全局 `affect_enabled` 是总开关**：群覆盖只能进一步关闭或改档（`false` 是可靠关闭），
+    不能越过全局关。它只影响**语气、长度、分段、人味与主动性**，
+    不进入事实、工具、白名单、限流与安全策略；数值不写进提示词，只注入自然语言片段。
+    不推断年龄 / 性别 / 健康 / 政治 / 宗教 / 性取向等敏感属性，不写记忆与用户画像；
+    **不做性 / 占有 / 成人内容**，不用内疚、恐惧或排他话术操纵用户。
+    注入必须消毒（去换行 / 引号 / 括号、限 40 字）并按 `off` / `line` / `full` 控预算；
+    读设置、选包、渲染或超时失败一律返回空串，**绝不能让 affect 让一条回复失败**。
+    内容包只改数据（基线、事件、文案、行为档），**不改框架 / 表 / API**；5 维是框架契约。
+    新增设置键按 §3 全流程（字段 / applyKey / 范围 / 后台 / golden / 文档 / 测试）；
+    改行为或注入要补 core 单测、e2e、store 乐观锁与设置 golden。
 
 ## 3. 修改配置项
 

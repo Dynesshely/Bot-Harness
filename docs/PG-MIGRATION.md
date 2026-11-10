@@ -50,17 +50,17 @@ bot-harness migrate --from /data/bot.db --to 'postgres://bot:<口令>@postgres:5
 ```
 schema_migrations → settings → conversations → dedup → stats → proactive_state
 → messages → records → tool_calls → scheduled_tasks → commitments → human_status
-→ memories → media
+→ affect_states → affect_events → affect_history → memories → media
 ```
 
-原有的十一张表顺序**原样保留**，新表 `commitments` / `human_status` 插在
-`scheduled_tasks` 与 `memories` 之间，`media` 仍然最后。
+原有的十一张表顺序**原样保留**，新表 `commitments` / `human_status` / `affect_*`
+插在 `scheduled_tasks` 与 `memories` 之间，`media` 仍然最后。
 `schema_migrations` 排在最前，因为它记录源库已应用的迁移。
 media 压尾是刻意的：44 MiB 的 BLOB 是唯一昂贵的表，失败时不该让便宜的表先搬完再卡在它上面。
 
-**旧 SQLite 文件兼容**：新表是升级后才存在的，`source.discover()` 把这两张表视为
+**旧 SQLite 文件兼容**：新表是升级后才存在的，`source.discover()` 把这些表视为
 `optionalTables` —— 源库里没有就跳过（目标库由运行时 `pgSchema` 在下次启动时补建），
-不会因为「源库还没有新表」拒绝整次迁移。源库已有这两张表时照常搬运 + 校验。
+不会因为「源库还没有新表」拒绝整次迁移。源库已有这些表时照常搬运 + 校验。
 
 ## 3. 安全性
 
