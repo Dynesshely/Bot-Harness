@@ -65,11 +65,13 @@ type Metrics struct {
 
 	// Join-gate counters: evals counts gate model calls, joins counts the ones
 	// that decided to speak, skips counts every non-join outcome (cheap gates
-	// included), errors counts failures (they are also fail-closed), topics
-	// counts saved topic splits.
+	// included), waits counts the "wait and look again" verdicts (they are also
+	// skips, so the two overlap on purpose), errors counts failures (they are
+	// also fail-closed), topics counts saved topic splits.
 	JoinGateEvals  atomic.Int64
 	JoinGateJoins  atomic.Int64
 	JoinGateSkips  atomic.Int64
+	JoinGateWaits  atomic.Int64
 	JoinGateErrors atomic.Int64
 	JoinGateTopics atomic.Int64
 }
@@ -103,6 +105,7 @@ type CounterSnapshot struct {
 	JoinGateEvals         int64 `json:"join_gate_evals"`
 	JoinGateJoins         int64 `json:"join_gate_joins"`
 	JoinGateSkips         int64 `json:"join_gate_skips"`
+	JoinGateWaits         int64 `json:"join_gate_waits"`
 	JoinGateErrors        int64 `json:"join_gate_errors"`
 	JoinGateTopics        int64 `json:"join_gate_topics"`
 }
@@ -137,6 +140,7 @@ func (m *Metrics) Snapshot() CounterSnapshot {
 		JoinGateEvals:         m.JoinGateEvals.Load(),
 		JoinGateJoins:         m.JoinGateJoins.Load(),
 		JoinGateSkips:         m.JoinGateSkips.Load(),
+		JoinGateWaits:         m.JoinGateWaits.Load(),
 		JoinGateErrors:        m.JoinGateErrors.Load(),
 		JoinGateTopics:        m.JoinGateTopics.Load(),
 	}

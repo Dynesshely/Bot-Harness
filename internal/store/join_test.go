@@ -74,6 +74,61 @@ func joinStoreContract(t *testing.T, s *Store) {
 		t.Fatalf("full recent group messages = %+v", all)
 	}
 
+	// --- quote lookup ---------------------------------------------------------
+	// The quote index is stored per message and joined back through the
+	// conversation, so the lookup must be group-scoped and assistant-only.
+	for _, c := range []Conversation{
+		{ID: "join-conv-quote", Scene: SceneGroupMember, GroupOpenID: "G-JOIN-QUOTE", GroupName: "quote group"},
+		{ID: "join-conv-other", Scene: SceneGroupMember, GroupOpenID: "G-JOIN-OTHER", GroupName: "other group"},
+	} {
+		if err := s.EnsureConversation(ctx, &c); err != nil {
+			t.Fatalf("seed quote conversation %s: %v", c.ID, err)
+		}
+	}
+	quoteMsg := func(conv, role, text, quote string) int64 {
+		t.Helper()
+		id, err := s.AppendMessageID(ctx, MessageInput{
+			ConversationID: conv, Role: role, Speaker: role, Content: text,
+			QuoteIndex: quote, Kind: KindObserved,
+		})
+		if err != nil {
+			t.Fatalf("append quote message to %s: %v", conv, err)
+		}
+		return id
+	}
+	botQuoteID := quoteMsg("join-conv-quote", "assistant", "bot reply", "REFIDX-BOT")
+	quoteMsg("join-conv-quote", "user", "user reply", "REFIDX-USER")
+	quoteMsg("join-conv-other", "assistant", "other bot", "REFIDX-OTHER")
+
+	quoted, err := s.RecentGroupMessages(ctx, "G-JOIN-QUOTE", 10)
+	if err != nil {
+		t.Fatalf("recent quote messages: %v", err)
+	}
+	if len(quoted) != 2 || quoted[0].ID != botQuoteID || quoted[0].QuoteIndex != "REFIDX-BOT" ||
+		quoted[1].QuoteIndex != "REFIDX-USER" {
+		t.Fatalf("recent quote messages = %+v", quoted)
+	}
+
+	for _, tc := range []struct {
+		name, group, ref string
+		want             bool
+	}{
+		{"assistant message hit", "G-JOIN-QUOTE", "REFIDX-BOT", true},
+		{"user message is not the bot", "G-JOIN-QUOTE", "REFIDX-USER", false},
+		{"quote of another group", "G-JOIN-OTHER", "REFIDX-BOT", false},
+		{"unknown ref", "G-JOIN-QUOTE", "REFIDX-NOPE", false},
+		{"empty ref", "G-JOIN-QUOTE", "", false},
+		{"unknown group", "G-JOIN-NOPE", "REFIDX-BOT", false},
+	} {
+		got, err := s.IsBotQuote(ctx, tc.group, tc.ref)
+		if err != nil {
+			t.Fatalf("is bot quote %s: %v", tc.name, err)
+		}
+		if got != tc.want {
+			t.Fatalf("is bot quote %s = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+
 	// --- decisions ------------------------------------------------------------
 	const (
 		t1 = "2026-01-01T09:00:00+08:00"
@@ -83,14 +138,14 @@ func joinStoreContract(t *testing.T, s *Store) {
 	)
 	seed := []JoinDecision{
 		{GroupOpenID: "G-JOIN-1", ConversationID: "join-conv-a", MessageID: "m1", Speaker: "小明",
-			Preview: "有人懂 Go 吗", Joined: true, Confidence: 0.82, Reason: "求助",
+			Preview: "有人懂 Go 吗", Joined: true, Action: "join", Confidence: 0.82, Reason: "求助",
 			TopicsJSON: `{"topics":[]}`, Model: "test-model", LatencyMS: 120, CreatedAt: t1},
 		{GroupOpenID: "G-JOIN-1", ConversationID: "join-conv-a", MessageID: "m2", Speaker: "小明",
-			Preview: "闲聊", Joined: false, Confidence: 0.2, Reason: "cooldown", LatencyMS: 0, CreatedAt: t2},
+			Preview: "闲聊", Joined: false, Action: "skip", Confidence: 0.2, Reason: "cooldown", LatencyMS: 0, CreatedAt: t2},
 		{GroupOpenID: "G-JOIN-2", ConversationID: "join-conv-c", MessageID: "m3", Speaker: "小红",
-			Preview: "另一个群", Joined: true, Confidence: 0.7, Reason: "话题延续", Model: "test-model", LatencyMS: 90, CreatedAt: t3},
+			Preview: "另一个群", Joined: false, Action: "wait", Confidence: 0.7, Reason: "话题延续", Model: "test-model", LatencyMS: 90, CreatedAt: t3},
 		{GroupOpenID: "G-JOIN-1", ConversationID: "join-conv-b", MessageID: "m4", Speaker: "小红",
-			Preview: "换了会话", Joined: false, Confidence: 0.1, Reason: "闲聊", LatencyMS: 0, CreatedAt: t4},
+			Preview: "换了会话", Joined: false, Action: "skip", Confidence: 0.1, Reason: "闲聊", LatencyMS: 0, CreatedAt: t4},
 	}
 	for _, d := range seed {
 		if err := s.AppendJoinDecision(ctx, d); err != nil {
@@ -121,9 +176,29 @@ func joinStoreContract(t *testing.T, s *Store) {
 		t.Fatalf("group decision order = %s,%s,%s,%s",
 			byGroup[0].MessageID, byGroup[1].MessageID, byGroup[2].MessageID, byGroup[3].MessageID)
 	}
-	if !byGroup[3].Joined || byGroup[3].Confidence != 0.82 || byGroup[3].LatencyMS != 120 ||
-		byGroup[3].TopicsJSON != `{"topics":[]}` || byGroup[3].CreatedAt != t1 {
+	if !byGroup[3].Joined || byGroup[3].Action != "join" || byGroup[3].Confidence != 0.82 ||
+		byGroup[3].LatencyMS != 120 || byGroup[3].TopicsJSON != `{"topics":[]}` || byGroup[3].CreatedAt != t1 {
 		t.Fatalf("decision round-trip = %+v", byGroup[3])
+	}
+	if byGroup[1].Action != "skip" {
+		t.Fatalf("cheap-skip decision action = %q, want skip", byGroup[1].Action)
+	}
+
+	// Only model evaluations count: the newer rows above carry no model (cheap
+	// skips / failures) and must not shadow the last real decision.
+	lastG1, err := s.LastJoinDecision(ctx, "G-JOIN-1")
+	if err != nil || lastG1 == nil {
+		t.Fatalf("last decision G-JOIN-1 = %+v err=%v", lastG1, err)
+	}
+	if lastG1.MessageID != "m1" || lastG1.Action != "join" || !lastG1.Joined || lastG1.Model != "test-model" {
+		t.Fatalf("last decision G-JOIN-1 = %+v, want m1/join", lastG1)
+	}
+	lastG2, err := s.LastJoinDecision(ctx, "G-JOIN-2")
+	if err != nil || lastG2 == nil || lastG2.MessageID != "m3" || lastG2.Action != "wait" || lastG2.Joined {
+		t.Fatalf("last decision G-JOIN-2 = %+v err=%v", lastG2, err)
+	}
+	if none, err := s.LastJoinDecision(ctx, "G-JOIN-none"); err != nil || none != nil {
+		t.Fatalf("last decision for unknown group = %+v err=%v, want nil", none, err)
 	}
 
 	all, err := s.ListJoinDecisions(ctx, "", 10)
@@ -256,6 +331,18 @@ func TestJoinTablesExistOnFreshDatabase(t *testing.T) {
 		if len(cols) == 0 {
 			t.Fatalf("table %s does not exist", table)
 		}
+		if table == "join_decisions" && !cols["action"] {
+			t.Fatal("join_decisions.action missing from the base schema")
+		}
+	}
+	var quoteIndexes int
+	if err := s.queryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_quote_index'`).
+		Scan(&quoteIndexes); err != nil {
+		t.Fatalf("check quote index: %v", err)
+	}
+	if quoteIndexes != 1 {
+		t.Fatalf("idx_messages_quote_index recorded %d times, want 1", quoteIndexes)
 	}
 	var applied int
 	if err := s.queryRowContext(ctx,

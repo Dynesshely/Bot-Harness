@@ -43,9 +43,39 @@ type Inbound struct {
 	// (message_scene.ext[msg_idx], a REFIDX_… token). Replying with it set as
 	// message_reference makes the answer a quoted reply in QQ.
 	QuoteIndex string
+	// RefMsgIndex is the message this one quotes (message_scene.ref_msg_idx).
+	// The platform only hands over the REFIDX_… token, so it has to be matched
+	// against stored quote indexes before it means anything.
+	RefMsgIndex string
+	// ReplyToBot reports that this message quotes one of the bot's own
+	// messages in this group. It is derived, not platform-provided: a hit makes
+	// the message as good as an @ (AtBot=true), but it is tracked separately so
+	// the reason a reply happened stays visible in the logs.
+	ReplyToBot bool
 	// Attachments are the message's files; images are already cached locally so
-	// the timeline keeps rendering after the platform URL expires.
+	// the timeline keeps rendering after the platform URL expires. Quoted and
+	// merged messages contribute their attachments too, so the timeline (and the
+	// next turn's context) keeps them.
 	Attachments []store.Attachment
+	// MediaRefs records where each cached image came from and in which order it
+	// appeared. It is deliberately separate from Attachments: the text the model
+	// sees needs the current|quoted distinction, while the store keeps a flat
+	// attachment list.
+	MediaRefs []MediaRef
+}
+
+// Media sources for Inbound.MediaRefs.
+const (
+	MediaSourceCurrent = "current"
+	MediaSourceQuoted  = "quoted"
+)
+
+// MediaRef is one model-visible cached image reference. The annotation in the
+// user text is derived from these, never from the raw platform payload.
+type MediaRef struct {
+	MediaID string
+	Source  string // MediaSourceCurrent | MediaSourceQuoted
+	Kind    string // "image" when the cache holds a usable image
 }
 
 type convTarget struct {

@@ -185,6 +185,7 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id);
+CREATE INDEX IF NOT EXISTS idx_messages_quote_index ON messages(quote_index);
 
 CREATE TABLE IF NOT EXISTS records (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -340,6 +341,7 @@ CREATE TABLE IF NOT EXISTS join_decisions (
   speaker         TEXT NOT NULL DEFAULT '',
   preview         TEXT NOT NULL DEFAULT '',
   joined          INTEGER NOT NULL DEFAULT 0,
+  action          TEXT NOT NULL DEFAULT '',
   confidence      REAL NOT NULL DEFAULT 0,
   reason          TEXT NOT NULL DEFAULT '',
   topics          TEXT NOT NULL DEFAULT '',
@@ -1727,6 +1729,7 @@ CREATE TABLE IF NOT EXISTS join_decisions (
   speaker         TEXT NOT NULL DEFAULT '',
   preview         TEXT NOT NULL DEFAULT '',
   joined          INTEGER NOT NULL DEFAULT 0,
+  action          TEXT NOT NULL DEFAULT '',
   confidence      REAL NOT NULL DEFAULT 0,
   reason          TEXT NOT NULL DEFAULT '',
   topics          TEXT NOT NULL DEFAULT '',
@@ -1741,9 +1744,22 @@ CREATE TABLE IF NOT EXISTS join_topics (
   topics       TEXT NOT NULL DEFAULT '',
   analyzed_at  TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_messages_quote_index ON messages(quote_index);
 `)
 	if err != nil {
 		return fmt.Errorf("create join_gate tables: %w", err)
+	}
+	// A database that already ran an earlier build of this migration has the
+	// table but not the column: CREATE TABLE IF NOT EXISTS does nothing there.
+	have, err := s.tableColumns(ctx, "join_decisions")
+	if err != nil {
+		return err
+	}
+	if !have["action"] {
+		if _, err := s.execContext(ctx,
+			`ALTER TABLE join_decisions ADD COLUMN action TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add join_decisions.action: %w", err)
+		}
 	}
 	return nil
 }

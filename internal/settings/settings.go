@@ -215,6 +215,17 @@ type Settings struct {
 	// JoinGateMaxPerHour / JoinGateMaxPerDay cap joins per group.
 	JoinGateMaxPerHour int `json:"join_gate_max_per_hour"`
 	JoinGateMaxPerDay  int `json:"join_gate_max_per_day"`
+	// JoinGateWaitRetrySeconds is the early re-evaluation delay after a "wait"
+	// verdict (10-300): once the topic has had time to develop, the next message
+	// may skip the normal evaluation cooldown.
+	JoinGateWaitRetrySeconds int `json:"join_gate_wait_retry_seconds"`
+	// JoinGateTopicDormantMinutes / JoinGateTopicClosedMinutes age topics out by
+	// their newest message (5-240 / 30-1440). They are the code-side backstop for
+	// the model: a topic with no new message for dormant minutes is downgraded to
+	// dormant, and for closed minutes to closed. Downgrade only — age never
+	// revives a topic the model itself called closed.
+	JoinGateTopicDormantMinutes int `json:"join_gate_topic_dormant_minutes"`
+	JoinGateTopicClosedMinutes  int `json:"join_gate_topic_closed_minutes"`
 
 	// --- 接入与运维（原先只存在于 .env）---
 
@@ -405,6 +416,10 @@ func Defaults() Settings {
 		JoinGateMinIntervalMinutes:  orInt(0, 5, 1, 240),
 		JoinGateMaxPerHour:          orInt(0, 3, 1, 30),
 		JoinGateMaxPerDay:           orInt(0, 12, 1, 100),
+		JoinGateWaitRetrySeconds:    orInt(0, 30, 10, 300),
+		// 话题寿命兜底：20 分钟没新消息算「暂歇」，180 分钟算「已结束」。
+		JoinGateTopicDormantMinutes: orInt(0, 20, 5, 240),
+		JoinGateTopicClosedMinutes:  orInt(0, 180, 30, 1440),
 		QQTransport:                 "websocket",
 		QQIntents:                   DefaultIntents,
 		QQShardCount:                1,
@@ -855,6 +870,19 @@ func validateRanges(s *Settings) error {
 	}
 	if s.JoinGateMaxPerDay < 1 || s.JoinGateMaxPerDay > 100 {
 		problems = append(problems, "join_gate_max_per_day must be within [1, 100]")
+	}
+	if s.JoinGateWaitRetrySeconds < 10 || s.JoinGateWaitRetrySeconds > 300 {
+		problems = append(problems, "join_gate_wait_retry_seconds must be within [10, 300]")
+	}
+	if s.JoinGateTopicDormantMinutes < 5 || s.JoinGateTopicDormantMinutes > 240 {
+		problems = append(problems, "join_gate_topic_dormant_minutes must be within [5, 240]")
+	}
+	if s.JoinGateTopicClosedMinutes < 30 || s.JoinGateTopicClosedMinutes > 1440 {
+		problems = append(problems, "join_gate_topic_closed_minutes must be within [30, 1440]")
+	}
+	if s.JoinGateTopicClosedMinutes <= s.JoinGateTopicDormantMinutes {
+		// 否则 closed 会在 dormant 之前触发，两个档位就失去意义。
+		problems = append(problems, "join_gate_topic_closed_minutes must be greater than join_gate_topic_dormant_minutes")
 	}
 	switch s.HumanizeLevel {
 	case "", "off", "soft", "medium", "strong":
@@ -1350,6 +1378,12 @@ func applyKey(dst *Settings, key string, raw json.RawMessage) error {
 		return json.Unmarshal(raw, &dst.JoinGateMaxPerHour)
 	case "join_gate_max_per_day":
 		return json.Unmarshal(raw, &dst.JoinGateMaxPerDay)
+	case "join_gate_wait_retry_seconds":
+		return json.Unmarshal(raw, &dst.JoinGateWaitRetrySeconds)
+	case "join_gate_topic_dormant_minutes":
+		return json.Unmarshal(raw, &dst.JoinGateTopicDormantMinutes)
+	case "join_gate_topic_closed_minutes":
+		return json.Unmarshal(raw, &dst.JoinGateTopicClosedMinutes)
 	case "humanize_level":
 		var level string
 		if err := json.Unmarshal(raw, &level); err != nil {

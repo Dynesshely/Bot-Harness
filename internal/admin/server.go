@@ -125,6 +125,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/memories", s.protected(s.handleDeleteMemory))
 	s.mux.HandleFunc("GET /api/models", s.protected(s.handleListModels))
 	s.mux.HandleFunc("GET /api/media/{id}", s.protected(s.handleGetMedia))
+	s.mux.HandleFunc("GET /api/groups/names", s.protected(s.handleGroupNames))
 	s.mux.HandleFunc("GET /api/groups/{group_openid}/state", s.protected(s.handleGroupState))
 	s.mux.HandleFunc("GET /api/stats", s.protected(s.handleStats))
 	s.mux.HandleFunc("GET /api/events/stream", s.protected(s.handleEventStream))

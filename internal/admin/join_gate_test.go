@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -69,19 +70,19 @@ func TestJoinEndpointsReturnRows(t *testing.T) {
 	ctx := context.Background()
 
 	seed := []struct {
-		group, conv, msg, preview string
-		joined                    bool
-		confidence                float64
-		at                        string
+		group, conv, msg, preview, action string
+		joined                            bool
+		confidence                        float64
+		at                                string
 	}{
-		{"G-JOIN-ADMIN-1", "conv-a", "m1", "有人懂这个吗", true, 0.81, "2026-01-01T09:00:00+08:00"},
-		{"G-JOIN-ADMIN-2", "conv-b", "m2", "随便聊聊", false, 0.12, "2026-01-01T09:05:00+08:00"},
-		{"G-JOIN-ADMIN-1", "conv-a", "m3", "继续刚才的话题", true, 0.66, "2026-01-01T09:10:00+08:00"},
+		{"G-JOIN-ADMIN-1", "conv-a", "m1", "有人懂这个吗", "join", true, 0.81, "2026-01-01T09:00:00+08:00"},
+		{"G-JOIN-ADMIN-2", "conv-b", "m2", "随便聊聊", "wait", false, 0.12, "2026-01-01T09:05:00+08:00"},
+		{"G-JOIN-ADMIN-1", "conv-a", "m3", "继续刚才的话题", "join", true, 0.66, "2026-01-01T09:10:00+08:00"},
 	}
 	for _, d := range seed {
 		if err := h.store.AppendJoinDecision(ctx, store.JoinDecision{
 			GroupOpenID: d.group, ConversationID: d.conv, MessageID: d.msg,
-			Preview: d.preview, Joined: d.joined, Confidence: d.confidence,
+			Preview: d.preview, Joined: d.joined, Action: d.action, Confidence: d.confidence,
 			Reason: "test", CreatedAt: d.at,
 		}); err != nil {
 			t.Fatalf("seed decision: %v", err)
@@ -100,8 +101,12 @@ func TestJoinEndpointsReturnRows(t *testing.T) {
 		t.Fatalf("all decisions = %#v, want 3 rows", all["decisions"])
 	}
 	first, _ := list[0].(map[string]any)
-	if first["message_id"] != "m3" || first["joined"] != true {
-		t.Fatalf("newest decision = %#v, want m3 joined", first)
+	if first["message_id"] != "m3" || first["joined"] != true || first["action"] != "join" {
+		t.Fatalf("newest decision = %#v, want m3 joined/join", first)
+	}
+	second, _ := list[1].(map[string]any)
+	if second["message_id"] != "m2" || second["action"] != "wait" {
+		t.Fatalf("second decision = %#v, want m2 wait", second)
 	}
 
 	// One group is a subset.
@@ -135,6 +140,76 @@ func TestJoinEndpointsReturnRows(t *testing.T) {
 	}
 	if raw, _ := topics["topics"].(string); !strings.Contains(raw, "Go 求助") {
 		t.Fatalf("topics JSON = %q", raw)
+	}
+}
+
+// TestGroupNamesRequireAuth pins the new group-name lookup to the protected
+// surface: it exposes group metadata, so it is not a public endpoint.
+func TestGroupNamesRequireAuth(t *testing.T) {
+	h := newAdminTestHarness(t)
+	resp := h.request(t, http.MethodGet, "/api/groups/names?openids=G1", nil,
+		func(req *http.Request) { req.Header.Del("Authorization") })
+	h.wantError(t, resp, http.StatusUnauthorized, "unauthorized")
+}
+
+// TestGroupNamesParams covers the batch contract: at least one openid, at most
+// 100 after de-duplication, and whitespace-only entries rejected.
+func TestGroupNamesParams(t *testing.T) {
+	h := newAdminTestHarness(t)
+
+	for _, path := range []string{
+		"/api/groups/names",
+		"/api/groups/names?openids=",
+		"/api/groups/names?openids=%20,%20",
+	} {
+		h.wantError(t, h.get(t, path), http.StatusBadRequest, "invalid_request")
+	}
+
+	// 101 unique ids exceed the batch; duplicate entries do not count twice.
+	ids := make([]string, 0, 102)
+	for i := 0; i < 101; i++ {
+		ids = append(ids, "G-BATCH-"+strconv.Itoa(i))
+	}
+	over := strings.Join(ids, ",")
+	h.wantError(t, h.get(t, "/api/groups/names?openids="+over),
+		http.StatusBadRequest, "invalid_request")
+	// Exactly 100 is accepted.
+	if body := h.wantOK(t, h.get(t,
+		"/api/groups/names?openids="+strings.Join(ids[:100], ","))); body["names"] == nil {
+		t.Fatalf("names missing from boundary response: %#v", body)
+	}
+	if body := h.wantOK(t, h.get(t,
+		"/api/groups/names?openids="+strings.Join(ids[:100], ",")+",G-BATCH-0")); body["names"] == nil {
+		t.Fatalf("duplicate openid should not count against the limit: %#v", body)
+	}
+}
+
+// TestGroupNamesResolve is the happy path: known groups get their cached name,
+// unknown groups are still present with an empty string so the panel can fall
+// back to the openid without special-casing a missing key.
+func TestGroupNamesResolve(t *testing.T) {
+	h := newAdminTestHarness(t)
+	h.seedConversation(t, store.Conversation{
+		ID: "names-conv-1", Scene: store.SceneGroupMember, GroupOpenID: "G-NAMES-1", GroupName: "测试群一",
+	})
+	h.seedConversation(t, store.Conversation{
+		ID: "names-conv-2", Scene: store.SceneGroupMember, GroupOpenID: "G-NAMES-2", GroupName: "测试群二",
+	})
+
+	body := h.wantOK(t, h.get(t,
+		"/api/groups/names?openids=%20G-NAMES-1%20,G-NAMES-2,G-NAMES-UNKNOWN,G-NAMES-1"))
+	names, ok := body["names"].(map[string]any)
+	if !ok {
+		t.Fatalf("names = %#v, want an object", body["names"])
+	}
+	if len(names) != 3 {
+		t.Fatalf("names = %#v, want 3 unique keys", names)
+	}
+	if names["G-NAMES-1"] != "测试群一" || names["G-NAMES-2"] != "测试群二" {
+		t.Fatalf("names = %#v", names)
+	}
+	if name, present := names["G-NAMES-UNKNOWN"]; !present || name != "" {
+		t.Fatalf("unknown group name = %#v (present=%v), want empty string", name, present)
 	}
 }
 

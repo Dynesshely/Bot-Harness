@@ -254,8 +254,11 @@ func newHarness(t *testing.T) *harness {
 			writeJSONCompletion(w, verdict)
 			return
 		}
-		// 图片分析工具是独立的多模态请求：没有系统标记，只带 image_url part。
-		if hasImagePart(body) {
+		// 图片分析工具是独立的多模态请求：只有一条 user 消息、没有 tools。
+		// 主对话即使带图也会带系统提示词与 tools，不能误判成一次视觉分析。
+		// 脚本驱动的工具调用优先：测试要在带图消息上强制调用 view_image，
+		// 这类请求必须先按脚本走一遍工具循环。
+		if isVisionAnalysisRequest(body) && !h.hasScriptedTool() {
 			h.mu.Lock()
 			h.humanStatusVisionCalls++
 			vision := h.humanStatusVision
@@ -543,6 +546,13 @@ func (h *harness) failUploads(fail bool) {
 	h.mu.Unlock()
 }
 
+// hasScriptedTool reports whether the fake model still has a tool call queued.
+func (h *harness) hasScriptedTool() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.aiToolScript) > 0
+}
+
 func (h *harness) sentMessages() []sentMessage {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -593,7 +603,7 @@ const polishMarker = "你是同一角色的润色器"
 const joinGateMarkerText = "【自主加入判断】"
 
 // defaultJoinGateVerdict keeps the gate off unless a test asks it to join.
-const defaultJoinGateVerdict = `{"topics":[{"id":"t1","title":"群聊","summary":"最近的群聊","message_ids":[]}],"current_topic_id":"t1","join":false,"confidence":0.1,"reason":"测试默认不加入"}`
+const defaultJoinGateVerdict = `{"topics":[{"id":"t1","title":"群聊","summary":"最近的群聊","message_ids":[]}],"current_topic_id":"t1","addressed_to":"unknown","action":"skip","confidence":0.1,"reason":"测试默认不加入"}`
 
 func (h *harness) setJoinGateReply(reply string) {
 	h.mu.Lock()
@@ -674,6 +684,25 @@ func hasImagePart(body map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// isVisionAnalysisRequest recognises the standalone multimodal calls made by the
+// view_image / analyze_image tools (one user message, no system prompt, no
+// tools). The main turn carries a system prompt and tool defs, even when it
+// also has image parts.
+func isVisionAnalysisRequest(body map[string]any) bool {
+	if _, hasTools := body["tools"]; hasTools {
+		return false
+	}
+	msgs, _ := body["messages"].([]any)
+	if len(msgs) != 1 {
+		return false
+	}
+	m, _ := msgs[0].(map[string]any)
+	if m["role"] != "user" {
+		return false
+	}
+	return hasImagePart(body)
 }
 
 // hasToolMessage reports whether this is the round after a tool execution.
@@ -4603,11 +4632,17 @@ func TestNonAIBodiesAreNeverPolished(t *testing.T) {
 
 // joinGateJoinVerdict builds a valid verdict that joins, with one topic.
 func joinGateJoinVerdict(confidence float64, reason, title string) string {
-	return `{"topics":[{"id":"t1","title":"` + title + `","summary":"摘要","message_ids":[]}],"current_topic_id":"t1","join":true,"confidence":` +
+	return `{"topics":[{"id":"t1","title":"` + title + `","summary":"摘要","message_ids":[],"type":"help"}],"current_topic_id":"t1","addressed_to":"group","action":"join","confidence":` +
 		strconv.FormatFloat(confidence, 'f', 2, 64) + `,"reason":"` + reason + `"}`
 }
 
-const joinGateSilentVerdict = `{"topics":[{"id":"t1","title":"闲聊","summary":"只是闲聊","message_ids":[]}],"current_topic_id":"t1","join":false,"confidence":0.2,"reason":"没有需要接住的东西"}`
+// joinGateVerdictWithAction builds a verdict for one specific action.
+func joinGateVerdictWithAction(action, addressedTo string) string {
+	return `{"topics":[{"id":"t1","title":"闲聊","summary":"只是闲聊","message_ids":[],"type":"chat"}],"current_topic_id":"t1","addressed_to":"` +
+		addressedTo + `","action":"` + action + `","confidence":0.8,"reason":"测试判定"}`
+}
+
+const joinGateSilentVerdict = `{"topics":[{"id":"t1","title":"闲聊","summary":"只是闲聊","message_ids":[]}],"current_topic_id":"t1","addressed_to":"someone_else","action":"skip","confidence":0.2,"reason":"没有需要接住的东西"}`
 
 func (h *harness) waitForJoinDecisions(t *testing.T, groupOpenID string, n int) []store.JoinDecision {
 	t.Helper()
@@ -4637,7 +4672,7 @@ func TestJoinGateRepliesToUnaddressedMessage(t *testing.T) {
 		t.Fatalf("join gate calls = %d, want 1", got)
 	}
 	decisions := h.waitForJoinDecisions(t, "G1", 1)
-	if len(decisions) != 1 || !decisions[0].Joined {
+	if len(decisions) != 1 || !decisions[0].Joined || decisions[0].Action != "join" {
 		t.Fatalf("expected one joined decision, got %#v", decisions)
 	}
 	if decisions[0].Confidence != 0.9 || decisions[0].Preview != "有人会 Go 吗" {
@@ -4659,7 +4694,7 @@ func TestJoinGateSilentVerdictKeepsTheBotQuiet(t *testing.T) {
 	h.dis.HandlePayload(context.Background(), groupAnyMessage("JG2", "G1", "U1", "小明", "今天天气不错"))
 
 	decisions := h.waitForJoinDecisions(t, "G1", 1)
-	if len(decisions) != 1 || decisions[0].Joined {
+	if len(decisions) != 1 || decisions[0].Joined || decisions[0].Action != "skip" {
 		t.Fatalf("expected one skipped decision, got %#v", decisions)
 	}
 	if decisions[0].Reason != "没有需要接住的东西" {
@@ -4673,6 +4708,9 @@ func TestJoinGateSilentVerdictKeepsTheBotQuiet(t *testing.T) {
 	if metrics.JoinGateEvals.Load() != 1 || metrics.JoinGateSkips.Load() != 1 || metrics.JoinGateJoins.Load() != 0 {
 		t.Fatalf("metrics evals/skips/joins = %d/%d/%d, want 1/1/0",
 			metrics.JoinGateEvals.Load(), metrics.JoinGateSkips.Load(), metrics.JoinGateJoins.Load())
+	}
+	if got := metrics.JoinGateWaits.Load(); got != 0 {
+		t.Fatalf("a skip verdict must not count as a wait, got %d", got)
 	}
 }
 
@@ -4861,5 +4899,317 @@ func TestJoinGateUsesConfiguredModelAndParameters(t *testing.T) {
 	}
 	if got, _ := body["max_tokens"].(float64); got != 600 {
 		t.Fatalf("gate max_tokens = %v, want 600", got)
+	}
+}
+
+// groupAnyMessageQuoting builds an E2 payload that quotes another message.
+// refMsgIndex is the platform token of the message being replied to.
+func groupAnyMessageQuoting(msgID, groupOpenID, memberOpenID, name, content, refMsgIndex string) *qq.Payload {
+	d, _ := json.Marshal(map[string]any{
+		"id":           msgID,
+		"content":      content,
+		"group_openid": groupOpenID,
+		"timestamp":    "2026-07-21T10:00:00+08:00",
+		"message_type": 0,
+		"message_scene": map[string]any{
+			"source": "default",
+			"ext":    []string{"ref_msg_idx=" + refMsgIndex, "msg_idx=REFIDX_" + msgID},
+		},
+		"author": map[string]any{
+			"id":            memberOpenID,
+			"member_openid": memberOpenID,
+			"username":      name,
+			"bot":           false,
+		},
+	})
+	return &qq.Payload{Op: qq.OpDispatch, T: qq.EventGroupMessageCreate, ID: "EV-" + msgID, D: d}
+}
+
+// seedBotMessage stores an assistant message of the bot in a group and returns
+// its platform quote index, which is what a member quotes to reply to it.
+func seedBotMessage(t *testing.T, h *harness, groupOpenID, quoteIndex string) string {
+	t.Helper()
+	ctxBg := context.Background()
+	convID := core.EncodeConversationID("group:" + groupOpenID + ":U1")
+	if err := h.st.EnsureConversation(ctxBg, &store.Conversation{
+		ID: convID, Scene: store.SceneGroupMember, GroupOpenID: groupOpenID, MemberOpenID: "U1",
+	}); err != nil {
+		t.Fatalf("conversation: %v", err)
+	}
+	if err := h.st.AppendMessage(ctxBg, store.MessageInput{
+		ConversationID: convID, Role: "assistant", Content: "我之前说过的话",
+		Kind: store.KindDialogue, QuoteIndex: quoteIndex,
+	}); err != nil {
+		t.Fatalf("append assistant message: %v", err)
+	}
+	return quoteIndex
+}
+
+// 引用机器人：命中 store.IsBotQuote 后与 @ 等价——直接回复，且不进入 join gate。
+func TestJoinGateQuoteOfBotSkipsGateAndReplies(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm"}`)
+	h.setJoinGateReply(joinGateSilentVerdict)
+	seedBotMessage(t, h, "G1", "REFIDX_BOTQ")
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessageQuoting("JQ1", "G1", "U1", "小明", "这个怎么解释", "REFIDX_BOTQ"))
+
+	sent := h.waitForSent(t, 1)
+	if len(sent) != 1 {
+		t.Fatalf("quoting the bot must produce exactly one reply, got %d", len(sent))
+	}
+	if got := h.joinGateCallCount(); got != 0 {
+		t.Fatalf("a bot quote is addressed; the gate must not run, got %d calls", got)
+	}
+	if decisions := h.joinDecisions(t, "G1"); len(decisions) != 0 {
+		t.Fatalf("a bot quote must not write a join decision: %#v", decisions)
+	}
+}
+
+// 无匹配的引用：行为不变 —— 未 @ 群消息按原语义处理，开启闸门时照常评估。
+func TestJoinGateUnmatchedQuoteKeepsBehaviour(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm"}`)
+	h.setJoinGateReply(joinGateSilentVerdict)
+	seedBotMessage(t, h, "G1", "REFIDX_BOTQ")
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessageQuoting("JQ2", "G1", "U1", "小明", "这个怎么解释", "REFIDX_SOMEONE_ELSE"))
+
+	if got := h.waitForJoinGateCalls(t, 1); got != 1 {
+		t.Fatalf("an unmatched quote is still an unaddressed message, got %d gate calls", got)
+	}
+	decisions := h.waitForJoinDecisions(t, "G1", 1)
+	if len(decisions) != 1 || decisions[0].Action != "skip" {
+		t.Fatalf("expected one skipped decision, got %#v", decisions)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if got := len(h.sentMessages()); got != 0 {
+		t.Fatalf("a silent verdict must stay silent, got %d sends", got)
+	}
+}
+
+// 引用识别关闭闸门时也必须工作：命中即 @ 语义，不受 join_gate_enabled 影响。
+func TestQuoteOfBotWorksWithGateDisabled(t *testing.T) {
+	h := newHarness(t)
+	seedBotMessage(t, h, "G1", "REFIDX_BOTQ")
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessageQuoting("JQ3", "G1", "U1", "小明", "还在吗", "REFIDX_BOTQ"))
+
+	if sent := h.waitForSent(t, 1); len(sent) != 1 {
+		t.Fatalf("quoting the bot must reply even with the gate off, got %d", len(sent))
+	}
+	if got := h.joinGateCallCount(); got != 0 {
+		t.Fatalf("join gate is off; it must not run, got %d calls", got)
+	}
+}
+
+// wait 只写 decision、不回复，并计进 join_gate_waits（同时仍算 skip）。
+func TestJoinGateWaitVerdictIsSilentAndCounted(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm"}`)
+	h.setJoinGateReply(joinGateVerdictWithAction("wait", "someone_else"))
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JW1", "G1", "U1", "小明", "两个人正在聊"))
+
+	decisions := h.waitForJoinDecisions(t, "G1", 1)
+	if len(decisions) != 1 || decisions[0].Action != "wait" || decisions[0].Joined {
+		t.Fatalf("expected one wait decision, got %#v", decisions)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if got := len(h.sentMessages()); got != 0 {
+		t.Fatalf("wait must not send anything, got %d", got)
+	}
+	metrics := h.dis.Metrics()
+	if metrics.JoinGateWaits.Load() != 1 || metrics.JoinGateSkips.Load() != 1 {
+		t.Fatalf("waits/skips = %d/%d, want 1/1",
+			metrics.JoinGateWaits.Load(), metrics.JoinGateSkips.Load())
+	}
+	if metrics.JoinGateJoins.Load() != 0 {
+		t.Fatalf("wait must not count as a join, got %d", metrics.JoinGateJoins.Load())
+	}
+}
+
+// wait 重试：评估冷却仍生效（新消息只写 cooldown decision，不调模型）；
+// 把上一条 wait 的评估时间回拨到重试窗口之外后，下一条新消息必须提前重评估。
+func TestJoinGateWaitRetryReevaluatesAfterTheWindow(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm","join_gate_eval_cooldown_seconds":600,"join_gate_wait_retry_seconds":30}`)
+	h.setJoinGateReply(joinGateVerdictWithAction("wait", "group"))
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JWR1", "G1", "U1", "小明", "这个话题还没聊完"))
+	if got := h.waitForJoinGateCalls(t, 1); got != 1 {
+		t.Fatalf("the first message should be evaluated, got %d calls", got)
+	}
+	h.waitForJoinDecisions(t, "G1", 1)
+
+	// 冷却期内：只写 cooldown decision，不调模型。
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JWR2", "G1", "U1", "小明", "我也觉得"))
+	decisions := h.waitForJoinDecisions(t, "G1", 2)
+	if len(decisions) != 2 {
+		t.Fatalf("a cooldown skip must still record a decision, got %d", len(decisions))
+	}
+	if !strings.HasPrefix(decisions[0].Reason, "cooldown:") {
+		t.Fatalf("newest decision should explain the cooldown, got %q", decisions[0].Reason)
+	}
+	if got := h.joinGateCallCount(); got != 1 {
+		t.Fatalf("wait retry only applies after its window, got %d calls", got)
+	}
+
+	// 回拨上一条真实评估：模拟 join_gate_wait_retry_seconds 已经过去。
+	if _, err := h.st.DB().ExecContext(context.Background(),
+		`UPDATE join_decisions SET created_at = ? WHERE group_openid = ? AND model <> ''`,
+		time.Now().Add(-90*time.Second).Format(time.RFC3339), "G1"); err != nil {
+		t.Fatalf("backdate the wait decision: %v", err)
+	}
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JWR3", "G1", "U1", "小明", "现在有新进展了"))
+	if got := h.waitForJoinGateCalls(t, 2); got != 2 {
+		t.Fatalf("a wait older than the retry window must re-evaluate, got %d calls", got)
+	}
+	if sent := h.sentMessages(); len(sent) != 0 {
+		t.Fatalf("a wait verdict must stay silent, got %d sends", len(sent))
+	}
+}
+
+// lastJoinGateUserText is the user message of the newest gate call, which is
+// where the window and the previous-topic block are rendered.
+func (h *harness) lastJoinGateUserText(t *testing.T) string {
+	t.Helper()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	msgs, _ := h.lastJoinGateBody["messages"].([]any)
+	for _, raw := range msgs {
+		m, _ := raw.(map[string]any)
+		if m["role"] != "user" {
+			continue
+		}
+		text, _ := m["content"].(string)
+		return text
+	}
+	return ""
+}
+
+// 上一次分析的话题（含状态）必须作为「上次话题」回灌给闸门模型：
+// closed 的话题明确标注「已结束，不要提」，避免模型旧事重提。
+func TestJoinGateFeedsPreviousTopicsWithStatus(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm"}`)
+	h.setJoinGateReply(joinGateSilentVerdict)
+	seed := `[
+		{"id":"t1","title":"容器部署","summary":"在聊部署","status":"active","message_ids":[]},
+		{"id":"t2","title":"旧账单","summary":"早就结了","status":"closed","message_ids":[]}
+	]`
+	if err := h.st.SaveJoinTopics(context.Background(), "G1", seed, time.Now().Add(-2*time.Minute).Format(time.RFC3339)); err != nil {
+		t.Fatalf("seed topics: %v", err)
+	}
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JPT1", "G1", "U1", "小明", "再聊聊部署的事"))
+	if got := h.waitForJoinGateCalls(t, 1); got != 1 {
+		t.Fatalf("expected one gate call, got %d", got)
+	}
+	text := h.lastJoinGateUserText(t)
+	if !strings.Contains(text, "上次话题") {
+		t.Fatalf("the gate input lost the previous-topic block:\n%s", text)
+	}
+	if !strings.Contains(text, "容器部署 [进行中]") {
+		t.Fatalf("active topic not fed with its label:\n%s", text)
+	}
+	if !strings.Contains(text, "旧账单 [已结束，不要提]") {
+		t.Fatalf("closed topic not fed as closed:\n%s", text)
+	}
+}
+
+// 保存前跑年龄兜底：模型没给 status 的话题落库时是 active，且带 resumable。
+func TestJoinGateSavedTopicsCarryLifecycle(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm"}`)
+	h.setJoinGateReply(joinGateSilentVerdict)
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JPT2", "G1", "U1", "小明", "今天我们聊点别的"))
+	h.waitForJoinDecisions(t, "G1", 1)
+
+	topics, err := h.st.GetJoinTopics(context.Background(), "G1")
+	if err != nil || topics == nil {
+		t.Fatalf("topics not saved: %v %#v", err, topics)
+	}
+	var parsed []map[string]any
+	if err := json.Unmarshal([]byte(topics.TopicsJSON), &parsed); err != nil || len(parsed) == 0 {
+		t.Fatalf("saved topics are not JSON: %v %q", err, topics.TopicsJSON)
+	}
+	if parsed[0]["status"] != "active" || parsed[0]["resumable"] != true {
+		t.Fatalf("a fresh topic must be saved as active/resumable: %#v", parsed[0])
+	}
+}
+
+// 全部 closed 的话题缓存不注入回复侧背景：没有可说的旧事。
+func TestJoinGateAllClosedTopicsAreNotInjected(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm"}`)
+	closed := `[{"id":"t1","title":"旧账单","summary":"早就结了","status":"closed"}]`
+	if err := h.st.SaveJoinTopics(context.Background(), "G1", closed, time.Now().Add(-time.Minute).Format(time.RFC3339)); err != nil {
+		t.Fatalf("seed topics: %v", err)
+	}
+
+	h.dis.HandlePayload(context.Background(), groupAtMessage("JPT3", "G1", "U1", "小明", "你好"))
+	if sent := h.waitForSent(t, 1); len(sent) != 1 {
+		t.Fatalf("expected one reply, got %d", len(sent))
+	}
+	if probe := h.systemPrompt(t); strings.Contains(probe.text, "群里最近的话题") {
+		t.Fatalf("an all-closed cache must not be injected:\n%s", probe.text)
+	}
+}
+
+// 年龄兜底也要在 e2e 里成立：缓存里的 active 话题若只有旧的分析时间、
+// 窗口里也没有它的消息，闸门输入必须已经把它降级成 closed。
+func TestJoinGatePreviousTopicAgedToClosed(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm"}`)
+	h.setJoinGateReply(joinGateSilentVerdict)
+	seed := `[{"id":"t1","title":"旧账单","summary":"早就结了","status":"active","message_ids":[]}]`
+	old := time.Now().Add(-200 * time.Minute).Format(time.RFC3339)
+	if err := h.st.SaveJoinTopics(context.Background(), "G1", seed, old); err != nil {
+		t.Fatalf("seed topics: %v", err)
+	}
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("JPT4", "G1", "U1", "小明", "说个新话题"))
+	if got := h.waitForJoinGateCalls(t, 1); got != 1 {
+		t.Fatalf("expected one gate call, got %d", got)
+	}
+	text := h.lastJoinGateUserText(t)
+	if !strings.Contains(text, "旧账单 [已结束，不要提]") {
+		t.Fatalf("an aged active topic must be fed as closed:\n%s", text)
+	}
+}
+
+// 闸门输入里要能看出「这条在回复谁」：被引用的窗口消息与当前消息都要标注。
+func TestJoinGateContextAnnotatesQuotedWindowMessage(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"join_gate_enabled":true,"join_gate_mode":"llm"}`)
+	h.setJoinGateReply(joinGateSilentVerdict)
+	ctxBg := context.Background()
+	convID := core.EncodeConversationID("group:G1:U1")
+	if err := h.st.EnsureConversation(ctxBg, &store.Conversation{
+		ID: convID, Scene: store.SceneGroupMember, GroupOpenID: "G1", MemberOpenID: "U1",
+	}); err != nil {
+		t.Fatalf("conversation: %v", err)
+	}
+	quotedID, err := h.st.AppendMessageID(ctxBg, store.MessageInput{
+		ConversationID: convID, Role: "user", Content: "有人会 Go 吗", Speaker: "小明",
+		SpeakerOpenID: "U1", Kind: store.KindObserved, QuoteIndex: "REFIDX_Q1",
+	})
+	if err != nil {
+		t.Fatalf("append quoted message: %v", err)
+	}
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessageQuoting("JQ4", "G1", "U2", "小红", "我会一点", "REFIDX_Q1"))
+	if got := h.waitForJoinGateCalls(t, 1); got != 1 {
+		t.Fatalf("expected one gate call, got %d", got)
+	}
+	text := h.lastJoinGateUserText(t)
+	if !strings.Contains(text, "（回复 [#"+strconv.FormatInt(quotedID, 10)+"]）") {
+		t.Fatalf("the current message's quote target is not annotated:\n%s", text)
+	}
+	if !strings.Contains(text, "（当前消息引用了这条）") {
+		t.Fatalf("the quoted window line is not marked:\n%s", text)
 	}
 }

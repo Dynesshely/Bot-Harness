@@ -34,6 +34,7 @@ type GroupMessage struct {
 	Role           string `json:"role"`
 	Speaker        string `json:"speaker"`
 	Content        string `json:"content"`
+	QuoteIndex     string `json:"quote_index,omitempty"`
 	CreatedAt      string `json:"created_at"`
 }
 
@@ -46,6 +47,7 @@ type JoinDecision struct {
 	Speaker        string  `json:"speaker"`
 	Preview        string  `json:"preview"`
 	Joined         bool    `json:"joined"`
+	Action         string  `json:"action"`
 	Confidence     float64 `json:"confidence"`
 	Reason         string  `json:"reason"`
 	TopicsJSON     string  `json:"topics"`
@@ -88,7 +90,7 @@ func (s *Store) RecentGroupMessages(ctx context.Context, groupOpenID string, lim
 	}
 	limit = clampJoinLimit(limit, 20, 200)
 	rows, err := s.queryContext(ctx, `
-SELECT m.id, m.conversation_id, m.role, m.speaker, m.content, m.created_at
+SELECT m.id, m.conversation_id, m.role, m.speaker, m.content, m.quote_index, m.created_at
   FROM messages m
   JOIN conversations c ON c.id = m.conversation_id
  WHERE c.group_openid = ?
@@ -105,7 +107,7 @@ SELECT m.id, m.conversation_id, m.role, m.speaker, m.content, m.created_at
 			m       GroupMessage
 			created nullableTimeText
 		)
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.Role, &m.Speaker, &m.Content, &created); err != nil {
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.Role, &m.Speaker, &m.Content, &m.QuoteIndex, &created); err != nil {
 			return nil, err
 		}
 		m.CreatedAt = created.Value
@@ -120,6 +122,37 @@ SELECT m.id, m.conversation_id, m.role, m.speaker, m.content, m.created_at
 	return out, nil
 }
 
+// IsBotQuote reports whether refMsgIndex is the stored quote index of an
+// assistant message in this group. The platform only hands us the REFIDX_…
+// token of the quoted message, so the store is the only place that can answer
+// "did the member quote the bot?" and let the gate treat it like an @.
+//
+// Unknown groups / indexes are a normal negative answer: the caller then falls
+// back to the existing @-only behaviour instead of failing the turn.
+func (s *Store) IsBotQuote(ctx context.Context, groupOpenID, refMsgIndex string) (bool, error) {
+	groupOpenID = strings.TrimSpace(groupOpenID)
+	refMsgIndex = strings.TrimSpace(refMsgIndex)
+	if groupOpenID == "" || refMsgIndex == "" {
+		return false, nil
+	}
+	var one int
+	err := s.queryRowContext(ctx, `
+SELECT 1
+  FROM messages m
+  JOIN conversations c ON c.id = m.conversation_id
+ WHERE c.group_openid = ?
+   AND m.quote_index = ?
+   AND m.role = 'assistant'
+ LIMIT 1`, groupOpenID, refMsgIndex).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // AppendJoinDecision records one evaluation. created_at is filled in when the
 // caller leaves it empty; the rest of the fields are stored verbatim because
 // the gate's fail-closed path writes partial decisions on purpose.
@@ -129,11 +162,11 @@ func (s *Store) AppendJoinDecision(ctx context.Context, d JoinDecision) error {
 	}
 	_, err := s.execContext(ctx, `
 INSERT INTO join_decisions (
-  group_openid, conversation_id, message_id, speaker, preview, joined,
+  group_openid, conversation_id, message_id, speaker, preview, joined, action,
   confidence, reason, topics, model, latency_ms, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		d.GroupOpenID, d.ConversationID, d.MessageID, d.Speaker, d.Preview,
-		boolToInt(d.Joined), d.Confidence, d.Reason, d.TopicsJSON, d.Model,
+		boolToInt(d.Joined), d.Action, d.Confidence, d.Reason, d.TopicsJSON, d.Model,
 		d.LatencyMS, d.CreatedAt)
 	return err
 }
@@ -145,7 +178,7 @@ func (s *Store) ListJoinDecisions(ctx context.Context, groupOpenID string, limit
 	limit = clampJoinLimit(limit, 50, 200)
 
 	query := `
-SELECT id, group_openid, conversation_id, message_id, speaker, preview, joined,
+SELECT id, group_openid, conversation_id, message_id, speaker, preview, joined, action,
        confidence, reason, topics, model, latency_ms, created_at
   FROM join_decisions`
 	args := []any{}
@@ -170,7 +203,7 @@ SELECT id, group_openid, conversation_id, message_id, speaker, preview, joined,
 			created nullableTimeText
 		)
 		if err := rows.Scan(&d.ID, &d.GroupOpenID, &d.ConversationID, &d.MessageID,
-			&d.Speaker, &d.Preview, &joined, &d.Confidence, &d.Reason,
+			&d.Speaker, &d.Preview, &joined, &d.Action, &d.Confidence, &d.Reason,
 			&d.TopicsJSON, &d.Model, &d.LatencyMS, &created); err != nil {
 			return nil, err
 		}
@@ -240,6 +273,40 @@ func (s *Store) CountJoinDecisionsSince(ctx context.Context, groupOpenID, since 
 		return 0, err
 	}
 	return n, nil
+}
+
+// LastJoinDecision returns the newest real *model evaluation* of one group, or
+// (nil, nil) when the group has never been evaluated. Cheap-gate skips are
+// stored with an empty model and must not hide an earlier evaluation: the
+// cooldown reads the action of the last decision the model actually made.
+func (s *Store) LastJoinDecision(ctx context.Context, groupOpenID string) (*JoinDecision, error) {
+	groupOpenID = strings.TrimSpace(groupOpenID)
+	if groupOpenID == "" {
+		return nil, nil
+	}
+	var (
+		d       JoinDecision
+		joined  int
+		created nullableTimeText
+	)
+	err := s.queryRowContext(ctx, `
+SELECT id, group_openid, conversation_id, message_id, speaker, preview, joined, action,
+       confidence, reason, topics, model, latency_ms, created_at
+  FROM join_decisions
+ WHERE group_openid = ? AND model <> ''
+ ORDER BY id DESC
+ LIMIT 1`, groupOpenID).Scan(&d.ID, &d.GroupOpenID, &d.ConversationID, &d.MessageID,
+		&d.Speaker, &d.Preview, &joined, &d.Action, &d.Confidence, &d.Reason,
+		&d.TopicsJSON, &d.Model, &d.LatencyMS, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	d.Joined = joined == 1
+	d.CreatedAt = created.Value
+	return &d, nil
 }
 
 // LastJoinDecisionAt returns the instant of the newest *model evaluation* of
