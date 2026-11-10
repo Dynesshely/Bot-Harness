@@ -12,6 +12,8 @@ import type {
   ConversationMessagesQuery,
   ConversationQuery,
   EditableConfig,
+  JoinDecisionsData,
+  JoinTopicsData,
   LogItem,
   LogList,
   LogQuery,
@@ -354,6 +356,30 @@ export const commitmentsApi = {
    */
   cancel(id: number): Promise<{ canceled: boolean }> {
     return request<{ canceled: boolean }>(`/commitments/${id}`, { method: 'DELETE' })
+  },
+}
+
+/* ------------------------------------------------------------------ *
+ * 自主加入（join_gate）
+ * ------------------------------------------------------------------ */
+
+export const joinApi = {
+  /**
+   * 最近加入决策。groupOpenid 为空 = 查全部群；limit 限 1–200。
+   * 后端未配置存储时返回 503，页面按 toMessage 展示即可。
+   */
+  decisions(groupOpenid = '', limit = 50, signal?: AbortSignal): Promise<JoinDecisionsData['decisions']> {
+    return request<JoinDecisionsData>('/join/decisions', {
+      query: { group_openid: groupOpenid, limit },
+      signal,
+    }).then((data) => (Array.isArray(data?.decisions) ? data.decisions : []))
+  },
+  /** 某个群最近一次话题分析；没有分析结果时后端返回 topics=null。 */
+  topics(groupOpenid: string, signal?: AbortSignal): Promise<JoinTopicsData['topics']> {
+    return request<JoinTopicsData>('/join/topics', {
+      query: { group_openid: groupOpenid },
+      signal,
+    }).then((data) => data?.topics ?? null)
   },
 }
 

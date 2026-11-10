@@ -37,6 +37,7 @@ const FULL_ROW: GroupOverride = {
   exec: true,
   affect: false,
   affect_inject_mode: 'full',
+  join_gate: false,
   polish: true,
   rate_limit_group_qpm: 12,
 }
@@ -59,6 +60,13 @@ describe('toGroupOverridePayload', () => {
     const [empty] = toGroupOverridePayload([{ group_openid: 'g2' }])
     expect(empty.affect).toBeNull()
     expect(empty.affect_inject_mode).toBeNull()
+  })
+
+  it('自主加入覆盖透传：join_gate 三态（true / false / null）都不丢', () => {
+    expect(toGroupOverridePayload([FULL_ROW])[0].join_gate).toBe(false)
+    expect(toGroupOverridePayload([{ ...FULL_ROW, join_gate: true }])[0].join_gate).toBe(true)
+    const [empty] = toGroupOverridePayload([{ group_openid: 'g3' }])
+    expect(empty.join_gate).toBeNull()
   })
 
   it('两阶段生成的 polish 覆盖原样透传（显式 false 也不被吞）', () => {

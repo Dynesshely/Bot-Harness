@@ -90,6 +90,24 @@ export interface EditableDraft {
   affect_tick_seconds: number
   /** 单次注入 token 上限，40–300。 */
   affect_inject_max_tokens: number
+  /** 自主加入：未 @ 群消息由模型判断是否加入；默认关。 */
+  join_gate_enabled: boolean
+  /** off 只记录不评估 / llm 交给模型判断。 */
+  join_gate_mode: string
+  /** 评估模型名；空串 = 主模型。 */
+  join_gate_model: string
+  /** 评估时取最近多少条群消息（5–50）。 */
+  join_gate_window: number
+  /** 最低加入置信度（0–1）。 */
+  join_gate_confidence: number
+  /** 同群两次评估最小间隔（秒，10–3600）。 */
+  join_gate_eval_cooldown_seconds: number
+  /** 两次加入最小间隔（分钟，1–240）。 */
+  join_gate_min_interval_minutes: number
+  /** 每小时加入上限（1–30）。 */
+  join_gate_max_per_hour: number
+  /** 每天加入上限（1–100）。 */
+  join_gate_max_per_day: number
   proactive_level: string
   proactive_ratio: number
   proactive_max_credits: number
@@ -197,6 +215,16 @@ export function emptyDraft(): EditableDraft {
     affect_event_classifier: 'rules',
     affect_tick_seconds: 300,
     affect_inject_max_tokens: 120,
+    // 自主加入与后端 Defaults() 对齐：默认关、llm、主模型、窗口 20、0.7、60s、5min、3/时、12/天。
+    join_gate_enabled: false,
+    join_gate_mode: 'llm',
+    join_gate_model: '',
+    join_gate_window: 20,
+    join_gate_confidence: 0.7,
+    join_gate_eval_cooldown_seconds: 60,
+    join_gate_min_interval_minutes: 5,
+    join_gate_max_per_hour: 3,
+    join_gate_max_per_day: 12,
     proactive_level: 'off',
     proactive_ratio: 10,
     proactive_max_credits: 3,
@@ -276,6 +304,12 @@ export type NumericKey =
   | 'human_status_timeline_messages'
   | 'affect_tick_seconds'
   | 'affect_inject_max_tokens'
+  | 'join_gate_window'
+  | 'join_gate_confidence'
+  | 'join_gate_eval_cooldown_seconds'
+  | 'join_gate_min_interval_minutes'
+  | 'join_gate_max_per_hour'
+  | 'join_gate_max_per_day'
   | 'proactive_ratio'
   | 'proactive_max_credits'
   | 'proactive_quiet_start'
@@ -402,6 +436,16 @@ export function assign(target: EditableDraft, source: EditableConfig | EditableD
   target.affect_event_classifier = source.affect_event_classifier ?? 'rules'
   target.affect_tick_seconds = source.affect_tick_seconds ?? 300
   target.affect_inject_max_tokens = source.affect_inject_max_tokens ?? 120
+  // 自主加入：默认关、llm、主模型；false 与空串都是真实值，?? 只挡 undefined / null。
+  target.join_gate_enabled = source.join_gate_enabled ?? false
+  target.join_gate_mode = source.join_gate_mode ?? 'llm'
+  target.join_gate_model = source.join_gate_model ?? ''
+  target.join_gate_window = source.join_gate_window ?? 20
+  target.join_gate_confidence = source.join_gate_confidence ?? 0.7
+  target.join_gate_eval_cooldown_seconds = source.join_gate_eval_cooldown_seconds ?? 60
+  target.join_gate_min_interval_minutes = source.join_gate_min_interval_minutes ?? 5
+  target.join_gate_max_per_hour = source.join_gate_max_per_hour ?? 3
+  target.join_gate_max_per_day = source.join_gate_max_per_day ?? 12
   target.proactive_level = source.proactive_level ?? 'off'
   target.proactive_ratio = source.proactive_ratio ?? 10
   target.proactive_max_credits = source.proactive_max_credits ?? 3
@@ -469,6 +513,12 @@ export const NUMERIC_PATCH_KEYS: readonly NumericKey[] = [
   'human_status_timeline_messages',
   'affect_tick_seconds',
   'affect_inject_max_tokens',
+  'join_gate_window',
+  'join_gate_confidence',
+  'join_gate_eval_cooldown_seconds',
+  'join_gate_min_interval_minutes',
+  'join_gate_max_per_hour',
+  'join_gate_max_per_day',
   'proactive_ratio',
   'proactive_max_credits',
   'proactive_quiet_start',
@@ -628,6 +678,17 @@ export function buildPatch(draft: EditableDraft, base: EditableDraft): Partial<E
   }
   if (draft.affect_event_classifier !== base.affect_event_classifier) {
     changed.affect_event_classifier = draft.affect_event_classifier as EditableConfig['affect_event_classifier']
+  }
+  // 自主加入：布尔 false 是真实值（停用），模式 / 模型空串也是真实值
+  //（join_gate_model='' = 改回主模型），必须照发。
+  if (draft.join_gate_enabled !== base.join_gate_enabled) {
+    changed.join_gate_enabled = draft.join_gate_enabled
+  }
+  if (draft.join_gate_mode !== base.join_gate_mode) {
+    changed.join_gate_mode = draft.join_gate_mode
+  }
+  if (draft.join_gate_model !== base.join_gate_model) {
+    changed.join_gate_model = draft.join_gate_model
   }
   if (draft.proactive_level !== base.proactive_level) {
     changed.proactive_level = draft.proactive_level

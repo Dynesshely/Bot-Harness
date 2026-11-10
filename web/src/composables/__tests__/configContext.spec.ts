@@ -85,6 +85,16 @@ describe('emptyDraft', () => {
     expect(draft.affect_event_classifier).toBe('rules')
     expect(draft.affect_tick_seconds).toBe(300)
     expect(draft.affect_inject_max_tokens).toBe(120)
+    // 自主加入：与后端 Defaults() 对齐（默认关、llm、主模型、窗口 20、0.7、60s、5min、3/时、12/天）
+    expect(draft.join_gate_enabled).toBe(false)
+    expect(draft.join_gate_mode).toBe('llm')
+    expect(draft.join_gate_model).toBe('')
+    expect(draft.join_gate_window).toBe(20)
+    expect(draft.join_gate_confidence).toBe(0.7)
+    expect(draft.join_gate_eval_cooldown_seconds).toBe(60)
+    expect(draft.join_gate_min_interval_minutes).toBe(5)
+    expect(draft.join_gate_max_per_hour).toBe(3)
+    expect(draft.join_gate_max_per_day).toBe(12)
     expect(draft.exec_enabled).toBe(false)
     expect(draft.tls_insecure_verify).toBe(false)
     expect(draft.tls_extra_ca_files).toEqual([])
@@ -342,6 +352,42 @@ describe('buildPatch：只提交改动字段', () => {
     // 布尔 false 是真实值（停用），必须照发
     expect(buildPatch(draftOf({ affect_enabled: false }), draftOf({ affect_enabled: true }))).toEqual({
       affect_enabled: false,
+    })
+  })
+
+  it('自主加入：默认关不提交；显式开关、模式、模型与数字都会进补丁', () => {
+    // 空草稿与空基线完全一致 → 一个键都不发
+    expect(buildPatch(draftOf(), draftOf())).toEqual({})
+
+    // 布尔 false 是真实值，照发；join_gate_model 空串 = 改回主模型，也照发。
+    expect(
+      buildPatch(
+        draftOf({
+          join_gate_enabled: false,
+          join_gate_mode: 'off',
+          join_gate_model: '',
+          join_gate_window: 30,
+          join_gate_confidence: 0.82,
+          join_gate_eval_cooldown_seconds: 120,
+          join_gate_min_interval_minutes: 10,
+          join_gate_max_per_hour: 5,
+          join_gate_max_per_day: 20,
+        }),
+        draftOf({
+          join_gate_enabled: true,
+          join_gate_model: 'cheap-model',
+        }),
+      ),
+    ).toEqual({
+      join_gate_enabled: false,
+      join_gate_mode: 'off',
+      join_gate_model: '',
+      join_gate_window: 30,
+      join_gate_confidence: 0.82,
+      join_gate_eval_cooldown_seconds: 120,
+      join_gate_min_interval_minutes: 10,
+      join_gate_max_per_hour: 5,
+      join_gate_max_per_day: 20,
     })
   })
 

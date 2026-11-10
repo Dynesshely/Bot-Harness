@@ -260,5 +260,55 @@ const { draft } = useConfig()
             模型也不会自主调用图片分析工具。
           </p>
         </div>
+
+        <!-- 自主加入：默认关；详细配置、群选择与决策记录在独立页面 -->
+        <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 class="flex items-center gap-2 text-sm font-medium text-slate-200">
+              自主加入
+              <span
+                class="badge"
+                :class="
+                  draft.join_gate_enabled
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                    : 'border-slate-700 bg-slate-800/60 text-slate-400'
+                "
+              >
+                {{ draft.join_gate_enabled ? '已启用' : '默认关闭' }}
+              </span>
+            </h3>
+            <RouterLink :to="{ name: 'join' }" class="btn btn-sm">
+              前往自主加入页
+              <AppIcon name="chevronRight" :size="14" />
+            </RouterLink>
+          </div>
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <ToggleField
+              v-model="draft.join_gate_enabled"
+              label="启用 join_gate_enabled"
+              hint="未 @ 机器人的群消息交给模型判断要不要加入"
+            />
+            <div>
+              <p class="label">模式 join_gate_mode</p>
+              <p class="text-sm text-slate-200">{{ draft.join_gate_mode }}</p>
+              <p class="field-hint">llm 由模型判断 / off 只记录不评估</p>
+            </div>
+            <div>
+              <p class="label">窗口 join_gate_window</p>
+              <p class="text-sm text-slate-200">{{ draft.join_gate_window }} 条</p>
+              <p class="field-hint">评估时取最近多少条群消息</p>
+            </div>
+            <div>
+              <p class="label">置信度 join_gate_confidence</p>
+              <p class="text-sm text-slate-200">{{ draft.join_gate_confidence }}</p>
+              <p class="field-hint">低于该值不加入，默认 0.7</p>
+            </div>
+          </div>
+          <p class="field-hint mt-2">
+            <b>默认关闭</b>；开启后每次评估最多调用一次模型（有评估冷却与每小时/每天加入上限）。
+            按群覆盖在「策略配置」里（join_gate 列），配置、群选择与最近决策都在
+            <RouterLink :to="{ name: 'join' }" class="link">自主加入</RouterLink> 页。
+          </p>
+        </div>
   </div>
 </template>

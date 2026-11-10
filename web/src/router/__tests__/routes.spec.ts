@@ -107,6 +107,13 @@ describe('侧边栏 NAV 与路由表', () => {
     }
   })
 
+  it('自主加入页：/join ↔ name join，且侧栏有入口', () => {
+    expect(router.resolve('/join').name).toBe('join')
+    expect(router.resolve({ name: 'join' }).path).toBe('/join')
+    expect(router.resolve({ name: 'join' }).meta.title).toBe('自主加入')
+    expect(navNames()).toContain('join')
+  })
+
   it('每个命名路由都能按自己的 name 解析回去（含带参数的路由）', () => {
     for (const record of router.getRoutes()) {
       if (typeof record.name !== 'string') continue

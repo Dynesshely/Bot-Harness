@@ -233,6 +233,27 @@ export interface EditableConfig {
   /** 图片分析使用的视觉模型名；空串 = 主模型。 */
   human_status_vision_model?: string
   /**
+   * 自主加入：未 @ 的群消息由模型判断是否加入（全局总开关，默认关）。
+   * 按群覆盖 group_overrides[].join_gate 只能在此基础上进一步关闭。
+   */
+  join_gate_enabled?: boolean
+  /** 自主加入模式：off 只记录不评估 / llm 交给模型判断。 */
+  join_gate_mode?: string
+  /** 评估使用的模型名；空串 = 主模型。 */
+  join_gate_model?: string
+  /** 评估时取最近多少条群消息（5–50，默认 20）。 */
+  join_gate_window?: number
+  /** 模型判断「值得加入」的最低置信度（0–1，默认 0.7）。 */
+  join_gate_confidence?: number
+  /** 同群两次评估的最小间隔（秒，10–3600，默认 60）。 */
+  join_gate_eval_cooldown_seconds?: number
+  /** 两次加入之间的最小间隔（分钟，1–240，默认 5）。 */
+  join_gate_min_interval_minutes?: number
+  /** 每小时最多加入几次（1–30，默认 3）。 */
+  join_gate_max_per_hour?: number
+  /** 每天最多加入几次（1–100，默认 12）。 */
+  join_gate_max_per_day?: number
+  /**
    * 情绪状态：按内容包积累 5 维数值，注入到系统提示词并影响回复行为。
    * 默认关；关闭时现有行为零变化。
    */
@@ -390,6 +411,8 @@ export interface GroupOverride {
   affect?: boolean | null
   /** 该群情绪注入档位（off / line / full）；null / 省略 = 跟随全局。 */
   affect_inject_mode?: AffectInjectMode | null
+  /** 该群是否启用「自主加入」（未 @ 消息由模型判断是否加入）；null / 省略 = 跟随全局。 */
+  join_gate?: boolean | null
   /** 0 / null = 不单独限流。 */
   rate_limit_group_qpm?: number | null
 }
@@ -768,6 +791,57 @@ export interface QuoteReplyState {
   override?: boolean | null
   /** 全局默认值。 */
   global: boolean
+}
+
+/* ------------------------------------------------------------------ *
+ * 自主加入（join_gate）
+ * ------------------------------------------------------------------ */
+
+/** 话题里的一条消息（message_ids 对应群消息的本地 id）。 */
+export interface JoinGateTopic {
+  id: string
+  title: string
+  summary: string
+  message_ids: number[]
+}
+
+/** 一条加入评估决策（joined=false 也会记录，便于解释「为什么没接」）。 */
+export interface JoinDecisionItem {
+  id: number
+  group_openid: string
+  conversation_id: string
+  /** 触发评估的那条群消息 id。 */
+  message_id: string
+  speaker: string
+  /** 消息预览（后端截断到 80 字）。 */
+  preview: string
+  joined: boolean
+  confidence: number
+  reason: string
+  /**
+   * 该次判定的话题。存储层是 TEXT（JSON 字符串），但 ADMIN-API 契约示例
+   * 与未来后端可能直接返回数组或 {topics:[…]}，页面解析统一容错。
+   */
+  topics: string | JoinGateTopic[]
+  model: string
+  latency_ms: number
+  created_at: string
+}
+
+/** 某个群最近一次话题分析结果。 */
+export interface JoinTopicsState {
+  group_openid: string
+  /** 话题（JSON 字符串或数组）；结构同 JoinGateTopic[]。 */
+  topics: string | JoinGateTopic[]
+  analyzed_at: string
+}
+
+export interface JoinDecisionsData {
+  decisions: JoinDecisionItem[]
+}
+
+export interface JoinTopicsData {
+  topics: JoinTopicsState | null
 }
 
 /* ------------------------------------------------------------------ *

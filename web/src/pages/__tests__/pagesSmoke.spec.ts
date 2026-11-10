@@ -12,6 +12,7 @@ import MemoriesPage from '@/pages/MemoriesPage.vue'
 import ToolsPage from '@/pages/ToolsPage.vue'
 import LoginPage from '@/pages/LoginPage.vue'
 import AffectPage from '@/pages/AffectPage.vue'
+import JoinPage from '@/pages/JoinPage.vue'
 import SettingsLayout from '@/pages/settings/SettingsLayout.vue'
 
 /**
@@ -59,6 +60,7 @@ const api = vi.hoisted(() => ({
   tasks: { list: vi.fn(), cancel: vi.fn() },
   commitments: { list: vi.fn(), cancel: vi.fn() },
   proactive: { overview: vi.fn() },
+  join: { decisions: vi.fn(), topics: vi.fn() },
   affect: {
     packs: vi.fn(),
     conversations: vi.fn(),
@@ -93,6 +95,7 @@ vi.mock('@/api', async (importOriginal) => {
     tasksApi: api.tasks,
     commitmentsApi: api.commitments,
     proactiveApi: api.proactive,
+    joinApi: api.join,
     affectApi: api.affect,
   }
 })
@@ -145,6 +148,60 @@ const policiesFixture = {
   ],
   platform: { known_groups: 0, full_access_groups: [], limited_groups: [] },
   warnings: [],
+}
+
+const joinDecisionsFixture = [
+  {
+    id: 128,
+    group_openid: 'GROUP_A',
+    conversation_id: 'conv-1',
+    message_id: 'm_1',
+    speaker: '小明',
+    preview: '有人懂这家店吗？周六想约个饭。',
+    joined: true,
+    confidence: 0.82,
+    reason: '明确求助且 bot 参与过话题',
+    topics: [
+      { id: 't1', title: '周末聚餐', summary: '在约周六晚饭。', message_ids: [12, 13] },
+    ],
+    model: 'smoke-model',
+    latency_ms: 840,
+    created_at: '2026-07-21T10:00:00Z',
+  },
+  {
+    id: 127,
+    group_openid: 'GROUP_A',
+    conversation_id: 'conv-1',
+    message_id: 'm_2',
+    speaker: '小红',
+    preview: '哈哈哈哈这也太好笑了',
+    joined: false,
+    confidence: 0.18,
+    reason: '闲聊，没有插话价值',
+    topics: [],
+    model: 'smoke-model',
+    latency_ms: 620,
+    created_at: '2026-07-21T09:58:00Z',
+  },
+]
+
+const joinTopicsFixture = {
+  group_openid: 'GROUP_A',
+  topics: [
+    {
+      id: 't1',
+      title: '周末聚餐',
+      summary: '几个人在约周六晚饭的时间和地点。',
+      message_ids: [12, 13, 14],
+    },
+    {
+      id: 't2',
+      title: '模型选型',
+      summary: '在比较本地部署与调用云端的成本。',
+      message_ids: [15, 16],
+    },
+  ],
+  analyzed_at: '2026-07-21T10:00:00Z',
 }
 
 const configFixture = {
@@ -205,6 +262,15 @@ const configFixture = {
     affect_event_classifier: 'rules',
     affect_tick_seconds: 300,
     affect_inject_max_tokens: 120,
+    join_gate_enabled: true,
+    join_gate_mode: 'llm',
+    join_gate_model: '',
+    join_gate_window: 20,
+    join_gate_confidence: 0.7,
+    join_gate_eval_cooldown_seconds: 60,
+    join_gate_min_interval_minutes: 5,
+    join_gate_max_per_hour: 3,
+    join_gate_max_per_day: 12,
     web_enabled: true,
     exec_enabled: false,
   },
@@ -403,6 +469,8 @@ function resetApiMocks(): void {
     quiet_hours: [23, 8],
     min_interval_minutes: 10,
   })
+  api.join.decisions.mockResolvedValue(joinDecisionsFixture)
+  api.join.topics.mockResolvedValue(joinTopicsFixture)
   api.logs.list.mockResolvedValue([])
   api.messages.list.mockResolvedValue({ total: 0, page: 1, page_size: 20, items: [] })
   api.affect.packs.mockResolvedValue(affectPacksFixture)
@@ -476,7 +544,7 @@ describe('一级页面挂载冒烟', () => {
       .find((input) => input.element.value === 'GROUP_A')
     expect(groupInput, '覆盖表没有渲染出 fixture 里的 GROUP_A 行').toBeTruthy()
     // 新增的七列能力覆盖都在表头里
-    for (const label of ['工具 tools', '主动 proactive', '定时 tasks', '记忆 memory', '人味 humanize', '联网 web', '执行 exec', '润色 polish']) {
+    for (const label of ['工具 tools', '主动 proactive', '自主加入 join_gate', '定时 tasks', '记忆 memory', '人味 humanize', '联网 web', '执行 exec', '润色 polish']) {
       expect(text, '覆盖表缺少列：' + label).toContain(label)
     }
     expect(unexpected(consoleErrors)).toEqual([])
@@ -544,6 +612,7 @@ describe('一级页面挂载冒烟', () => {
     { label: '长期记忆', component: MemoriesPage, path: '/memories', anchor: '记忆' },
     { label: '工具调用', component: ToolsPage, path: '/tools', anchor: '工具' },
     { label: '情绪状态', component: AffectPage, path: '/affect', anchor: '情绪状态' },
+    { label: '自主加入', component: JoinPage, path: '/join', anchor: '自主加入' },
     { label: '登录页', component: LoginPage, path: '/login', anchor: '登录' },
   ]
 
@@ -558,6 +627,62 @@ describe('一级页面挂载冒烟', () => {
       wrapper.unmount()
     })
   }
+
+  it('自主加入：渲染加入/跳过决策、置信度、原因与最新话题', async () => {
+    const wrapper = await mountRoute(JoinPage, '/join')
+    let text = wrapper.text()
+    // 未选群时查全部群，但不请求话题接口。
+    expect(api.join.decisions).toHaveBeenCalledWith('', 50)
+    expect(api.join.topics).not.toHaveBeenCalled()
+    expect(text).toContain('有人懂这家店吗？周六想约个饭。')
+    expect(text).toContain('哈哈哈哈这也太好笑了')
+    expect(text).toContain('明确求助且 bot 参与过话题')
+    expect(text).toContain('闲聊，没有插话价值')
+    expect(text).toContain('置信度 82%')
+    expect(text).toContain('置信度 18%')
+    expect(text).toContain('加入')
+    expect(text).toContain('跳过')
+    expect(text).toContain('周末聚餐')
+    expect(text).toContain('选择一个群后显示它最近一次话题切分')
+
+    // 选一个群后拉取该群话题，标题 / 摘要 / message_ids 都渲染出来。
+    await wrapper.find('#join-group').setValue('GROUP_A')
+    await flushPromises()
+    await flushPromises()
+    expect(api.join.topics).toHaveBeenCalledWith('GROUP_A')
+    expect(api.join.decisions).toHaveBeenLastCalledWith('GROUP_A', 50)
+    text = wrapper.text()
+    expect(text).toContain('几个人在约周六晚饭的时间和地点。')
+    expect(text).toContain('在比较本地部署与调用云端的成本。')
+    expect(text).toContain('12, 13, 14')
+    expect(text).toContain('15, 16')
+
+    expect(unexpected(consoleErrors)).toEqual([])
+    expect(unexpected(consoleWarns)).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('自主加入：未启用时显示空状态与一键启用引导', async () => {
+    api.config.get.mockResolvedValue({
+      ...configFixture,
+      editable: { ...configFixture.editable, join_gate_enabled: false },
+    })
+    api.join.decisions.mockResolvedValue([])
+    api.join.topics.mockResolvedValue({ group_openid: 'GROUP_A', topics: [], analyzed_at: '' })
+
+    const wrapper = await mountRoute(JoinPage, '/join')
+    const text = wrapper.text()
+    expect(text).toContain('默认关闭')
+    expect(text).toContain('还没有加入决策')
+    expect(text).toContain('自主加入尚未启用')
+    expect(text).toContain('一键启用自主加入')
+    // 配置区仍在，且说明默认关与成本。
+    expect(text).toContain('join_gate_enabled')
+    expect(text).toContain('每次评估最多调用一次模型')
+    expect(unexpected(consoleErrors)).toEqual([])
+    expect(unexpected(consoleWarns)).toEqual([])
+    wrapper.unmount()
+  })
 })
 
 describe('设置页 6 个二级页挂载冒烟', () => {
@@ -593,6 +718,9 @@ describe('设置页 6 个二级页挂载冒烟', () => {
         'tools_max_steps',
         'tools_total_budget_seconds',
         'tools_result_max_chars',
+        '自主加入',
+        '前往自主加入页',
+        'join_gate_enabled',
         '人类状态感知',
         'human_status_enabled',
         'human_status_trigger_messages',

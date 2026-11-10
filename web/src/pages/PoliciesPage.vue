@@ -217,6 +217,7 @@ function addOverride() {
     polish: null,
     affect: null,
     affect_inject_mode: null,
+    join_gate: null,
     rate_limit_group_qpm: null,
   })
 }
@@ -626,6 +627,7 @@ function setOverrideQpm(row: GroupOverride, value: string) {
                 <th class="th min-w-[10rem]">上下文范围</th>
                 <th class="th min-w-[8rem]">工具 tools</th>
                 <th class="th min-w-[8rem]">主动 proactive</th>
+                <th class="th min-w-[8rem]">自主加入 join_gate</th>
                 <th class="th min-w-[8rem]">定时 tasks</th>
                 <th class="th min-w-[8rem]">记忆 memory</th>
                 <th class="th min-w-[8rem]">人味 humanize</th>
@@ -716,6 +718,17 @@ function setOverrideQpm(row: GroupOverride, value: string) {
                     <option value="">跟随全局</option>
                     <option value="off">关闭</option>
                     <option value="auto">自动</option>
+                  </select>
+                </td>
+                <td class="td">
+                  <select
+                    class="input"
+                    :value="row.join_gate === null || row.join_gate === undefined ? '' : String(row.join_gate)"
+                    @change="setOverrideBool(row, 'join_gate', ($event.target as HTMLSelectElement).value)"
+                  >
+                    <option value="">跟随全局</option>
+                    <option value="true">启用</option>
+                    <option value="false">关闭</option>
                   </select>
                 </td>
                 <td class="td">

@@ -12,6 +12,7 @@ export type OverrideBoolKey =
   | 'web'
   | 'exec'
   | 'affect'
+  | 'join_gate'
 
 /** 可按群覆盖的枚举档位字段（null = 跟随全局）。 */
 export type OverrideLevelKey = 'proactive' | 'humanize' | 'affect_inject_mode'
@@ -49,6 +50,7 @@ export function toGroupOverridePayload(rows: readonly GroupOverride[]): GroupOve
     web: row.web ?? null,
     exec: row.exec ?? null,
     affect: row.affect ?? null,
+    join_gate: row.join_gate ?? null,
     affect_inject_mode: row.affect_inject_mode ?? null,
     rate_limit_group_qpm: row.rate_limit_group_qpm ?? null,
   }))
