@@ -25,6 +25,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/dynesshely/bot-harness/internal/admin"
+	"github.com/dynesshely/bot-harness/internal/affect"
 	"github.com/dynesshely/bot-harness/internal/ai"
 	"github.com/dynesshely/bot-harness/internal/bus"
 	"github.com/dynesshely/bot-harness/internal/config"
@@ -268,6 +269,11 @@ func run() error {
 		settingsMgr.Effective().VisionMaxImages,
 	)
 
+	// 情绪状态：默认关闭，但仍然构造服务并跑 ticker，这样后台一开开关就生效。
+	// 关闭时所有接入点都走 "nil/空块" 分支，回复管线与没有这个功能时一致。
+	affectSvc := affect.NewService(st, settingsMgr, logger.With("component", "affect"), affect.NewMetrics())
+	go affectSvc.Run(rootCtx)
+
 	dispatcher := core.New(core.Options{
 		QQBotOpenID: cur.QQBotOpenID,
 		Settings:    settingsMgr,
@@ -280,6 +286,7 @@ func run() error {
 		QQ:          qqClient,
 		Media:       mediaBundle,
 		Tools:       tools.Builtins(),
+		Affect:      affectSvc,
 	})
 	dispatcher.Start(rootCtx)
 	// 指令面板同步是纯展示层：延迟 8s 起，失败按 30s/1m/2m/5m/10m 退避重试，
@@ -350,6 +357,7 @@ func run() error {
 		Logger:     logger,
 		LogRing:    ring,
 		Media:      mediaBundle,
+		Affect:     affectSvc,
 		StartedAt:  time.Now(),
 	})
 

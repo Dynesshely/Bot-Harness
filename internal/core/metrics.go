@@ -47,6 +47,21 @@ type Metrics struct {
 	// inference (successful or not). Vision calls are extra model requests, so
 	// this is the cost signal for the image capability.
 	HumanStatusImageCalls atomic.Int64
+
+	// Affect counters (internal/affect). All five are monotonic process-lifetime
+	// counters: ticks are completed background ticks, events are classified
+	// messages, injections count non-empty prompt blocks, inject chars is their
+	// total size, and errors counts failed observe/tick/block attempts.
+	//
+	// The affect package keeps its own totals (affect.Metrics) so it stays
+	// independent of core; the admin /api/status handler merges them into this
+	// snapshot with mergeAffectCounters. These fields remain the JSON contract
+	// and a place for a future bridge that does not go through admin.
+	AffectTicks       atomic.Int64
+	AffectEvents      atomic.Int64
+	AffectInjections  atomic.Int64
+	AffectInjectChars atomic.Int64
+	AffectErrors      atomic.Int64
 }
 
 // CounterSnapshot is the JSON shape of Metrics.
@@ -70,6 +85,11 @@ type CounterSnapshot struct {
 	HumanStatusRuns       int64 `json:"human_status_runs"`
 	HumanStatusFailures   int64 `json:"human_status_failures"`
 	HumanStatusImageCalls int64 `json:"human_status_image_calls"`
+	AffectTicks           int64 `json:"affect_ticks"`
+	AffectEvents          int64 `json:"affect_events"`
+	AffectInjections      int64 `json:"affect_injections"`
+	AffectInjectChars     int64 `json:"affect_inject_chars"`
+	AffectErrors          int64 `json:"affect_errors"`
 }
 
 // Snapshot returns the current counter values.
@@ -94,6 +114,25 @@ func (m *Metrics) Snapshot() CounterSnapshot {
 		HumanStatusRuns:       m.HumanStatusRuns.Load(),
 		HumanStatusFailures:   m.HumanStatusFailures.Load(),
 		HumanStatusImageCalls: m.HumanStatusImageCalls.Load(),
+		AffectTicks:           m.AffectTicks.Load(),
+		AffectEvents:          m.AffectEvents.Load(),
+		AffectInjections:      m.AffectInjections.Load(),
+		AffectInjectChars:     m.AffectInjectChars.Load(),
+		AffectErrors:          m.AffectErrors.Load(),
+	}
+}
+
+// AddAffectInjection counts one non-empty prompt block and its character size.
+//
+// It is the core-side helper for any caller that feeds this Metrics object
+// directly; the shipped affect.Service instead owns affect.Metrics and the
+// admin status handler merges that. Either way the rule is the same: only a
+// non-empty Block counts as an injection, so mode off / paused / failure never
+// looks like a successful injection in the panel.
+func (m *Metrics) AddAffectInjection(chars int) {
+	m.AffectInjections.Add(1)
+	if chars > 0 {
+		m.AffectInjectChars.Add(int64(chars))
 	}
 }
 

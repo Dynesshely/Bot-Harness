@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dynesshely/bot-harness/internal/affect"
 	"github.com/dynesshely/bot-harness/internal/ai"
 	"github.com/dynesshely/bot-harness/internal/bus"
 	"github.com/dynesshely/bot-harness/internal/config"
@@ -44,6 +45,10 @@ type Deps struct {
 	LogRing    *logging.Ring
 	Media      *media.Bundle
 	StartedAt  time.Time
+	// Affect is the mood service behind /api/affect. It is optional: the rest of
+	// the panel works without it, and the affect endpoints answer 503 when it is
+	// absent (feature built but not wired).
+	Affect *affect.Service
 }
 
 // Server is the admin HTTP surface.
@@ -101,6 +106,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/proactive", s.protected(s.handleListProactive))
 	s.mux.HandleFunc("GET /api/tasks", s.protected(s.handleListTasks))
 	s.mux.HandleFunc("DELETE /api/tasks/{id}", s.protected(s.handleCancelTask))
+	s.mux.HandleFunc("GET /api/affect/packs", s.protected(s.handleAffectPacks))
+	s.mux.HandleFunc("GET /api/affect/conversations", s.protected(s.handleAffectConversations))
+	s.mux.HandleFunc("GET /api/affect/state", s.protected(s.handleAffectState))
+	s.mux.HandleFunc("GET /api/affect/history", s.protected(s.handleAffectHistory))
+	s.mux.HandleFunc("GET /api/affect/events", s.protected(s.handleAffectEvents))
+	s.mux.HandleFunc("POST /api/affect/pause", s.protected(s.handleAffectPause))
+	s.mux.HandleFunc("POST /api/affect/resume", s.protected(s.handleAffectResume))
+	s.mux.HandleFunc("POST /api/affect/preset", s.protected(s.handleAffectPreset))
+	s.mux.HandleFunc("POST /api/affect/reset", s.protected(s.handleAffectReset))
 	s.mux.HandleFunc("GET /api/commitments", s.protected(s.handleListCommitments))
 	s.mux.HandleFunc("DELETE /api/commitments/{id}", s.protected(s.handleCancelCommitment))
 	s.mux.HandleFunc("GET /api/memories", s.protected(s.handleListMemories))

@@ -51,9 +51,10 @@ func TestConfigKeysAreCompleteAndSorted(t *testing.T) {
 	}
 
 	wantOverride := []string{
-		"context_mode", "context_scope", "enabled", "exec", "group_openid",
-		"humanize", "memory", "polish", "proactive", "quote_reply", "rate_limit_group_qpm",
-		"reply_to_bots", "tasks", "tools", "trigger_mode", "web",
+		"affect", "affect_inject_mode", "context_mode", "context_scope", "enabled",
+		"exec", "group_openid", "humanize", "memory", "polish", "proactive",
+		"quote_reply", "rate_limit_group_qpm", "reply_to_bots", "tasks", "tools",
+		"trigger_mode", "web",
 	}
 	if !reflect.DeepEqual(manifest.GroupOverride, wantOverride) {
 		t.Fatalf("GroupOverride 键集合不对：\n got %v\nwant %v", manifest.GroupOverride, wantOverride)

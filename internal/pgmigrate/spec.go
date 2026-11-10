@@ -38,6 +38,9 @@ var TableOrder = []string{
 	"scheduled_tasks",
 	"commitments",
 	"human_status",
+	"affect_states",
+	"affect_events",
+	"affect_history",
 	"memories",
 	"media",
 }

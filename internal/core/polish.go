@@ -112,7 +112,7 @@ func polishDeadline(ctx context.Context, timeoutSeconds int) time.Duration {
 // acquire it, because processMessage takes it around the whole turn and
 // MaxConcurrentLLM defaults to 4 (1 in tests) — a nested Acquire would deadlock.
 func (d *Dispatcher) newPolish(ctx context.Context, s settings.Settings, cfg settings.GroupConfig,
-	systemPrompt, draft string) polishResult {
+	systemPrompt, draft, stateLine string) polishResult {
 
 	res := polishResult{Text: draft}
 	res.Model = strings.TrimSpace(s.PolishModel)
@@ -137,8 +137,15 @@ func (d *Dispatcher) newPolish(ctx context.Context, s settings.Settings, cfg set
 
 	// Only two messages, ever: the persona/format rules and the draft. No
 	// history, no user text, no tool output.
+	// The state line is optional and already capped at ~25 tokens. It is
+	// appended to the persona so stage 2 can keep the voice, not to add facts.
+	system := strings.TrimSpace(systemPrompt)
+	if line := strings.TrimSpace(stateLine); line != "" {
+		system += "\n\n" + line
+	}
+	system += "\n\n" + defaultPolishInstruction
 	messages := []ai.Message{
-		{Role: ai.RoleSystem, Content: strings.TrimSpace(systemPrompt) + "\n\n" + defaultPolishInstruction},
+		{Role: ai.RoleSystem, Content: system},
 		{Role: ai.RoleUser, Content: draft},
 	}
 	res.Prompt = messages

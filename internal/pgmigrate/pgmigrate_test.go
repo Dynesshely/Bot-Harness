@@ -248,8 +248,8 @@ func freshDatabase(t *testing.T, dsn string) string {
 }
 
 func TestTableOrderCoversEveryTable(t *testing.T) {
-	if len(TableOrder) != 14 {
-		t.Fatalf("TableOrder has %d tables, want 14", len(TableOrder))
+	if len(TableOrder) != 17 {
+		t.Fatalf("TableOrder has %d tables, want 17", len(TableOrder))
 	}
 	seen := map[string]bool{}
 	for _, name := range TableOrder {

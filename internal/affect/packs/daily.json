@@ -1,0 +1,433 @@
+{
+  "id": "daily",
+  "name": "日常心境",
+  "version": "1.0.0",
+  "description": "群里日常聊天用的通用心境：随着对话慢慢起伏，也慢慢回落，只影响语气和长短。",
+  "dimensions": [
+    {
+      "key": "valence",
+      "label": "心情",
+      "min": 0,
+      "max": 100,
+      "baseline": 55,
+      "half_life_hours": 8
+    },
+    {
+      "key": "energy",
+      "label": "精力",
+      "min": 0,
+      "max": 100,
+      "baseline": 55,
+      "half_life_hours": 6
+    },
+    {
+      "key": "stress",
+      "label": "压力",
+      "min": 0,
+      "max": 100,
+      "baseline": 30,
+      "half_life_hours": 4
+    },
+    {
+      "key": "closeness",
+      "label": "熟悉度",
+      "min": 0,
+      "max": 100,
+      "baseline": 45,
+      "half_life_hours": 72
+    },
+    {
+      "key": "patience",
+      "label": "耐心",
+      "min": 0,
+      "max": 100,
+      "baseline": 65,
+      "half_life_hours": 5
+    }
+  ],
+  "coupling": [
+    {
+      "source": "stress",
+      "target": "patience",
+      "mode": "cap",
+      "base": 100,
+      "scale": -0.8,
+      "floor": 15
+    },
+    {
+      "source": "stress",
+      "target": "valence",
+      "mode": "cap",
+      "base": 100,
+      "scale": -0.35,
+      "floor": 20
+    },
+    {
+      "source": "energy",
+      "target": "patience",
+      "mode": "cap",
+      "base": 100,
+      "scale": -0.25,
+      "floor": 20
+    }
+  ],
+  "events": [
+    {
+      "id": "praise",
+      "label": "被夸",
+      "tone": "positive",
+      "deltas": {
+        "valence": 1.5,
+        "closeness": 0.5,
+        "energy": 0.3
+      },
+      "patterns": [
+        "(?i)厉害|真棒|好可爱|太强了|牛啊|靠谱|不愧是你"
+      ],
+      "daily_cap": 20
+    },
+    {
+      "id": "thanks",
+      "label": "被感谢",
+      "tone": "positive",
+      "deltas": {
+        "valence": 0.9,
+        "closeness": 0.6
+      },
+      "patterns": [
+        "(?i)谢谢|感谢|多谢|辛苦了|麻烦你了"
+      ],
+      "daily_cap": 20
+    },
+    {
+      "id": "joke",
+      "label": "说笑",
+      "tone": "positive",
+      "deltas": {
+        "valence": 1,
+        "energy": 0.4,
+        "stress": -0.8
+      },
+      "patterns": [
+        "(?i)哈哈|笑死|hhh|😂|🤣|太好笑了|什么梗"
+      ],
+      "daily_cap": 30
+    },
+    {
+      "id": "help",
+      "label": "帮上忙",
+      "tone": "positive",
+      "deltas": {
+        "valence": 1,
+        "closeness": 0.4
+      },
+      "patterns": [
+        "(?i)帮到我|有用|解决了|懂了|学到了|明白了"
+      ],
+      "daily_cap": 15
+    },
+    {
+      "id": "greet",
+      "label": "打招呼",
+      "tone": "positive",
+      "deltas": {
+        "valence": 0.5,
+        "closeness": 0.3
+      },
+      "patterns": [
+        "(?i)早安|早上好|晚安|你好|在吗|嗨"
+      ],
+      "daily_cap": 10
+    },
+    {
+      "id": "agree",
+      "label": "聊到一起",
+      "tone": "positive",
+      "deltas": {
+        "valence": 0.7,
+        "closeness": 0.4
+      },
+      "patterns": [
+        "(?i)同意|确实|说得对|有道理|我也是"
+      ],
+      "daily_cap": 15
+    },
+    {
+      "id": "food",
+      "label": "吃饭",
+      "tone": "positive",
+      "deltas": {
+        "energy": 1,
+        "valence": 0.4
+      },
+      "patterns": [
+        "(?i)吃饭|吃了吗|外卖|宵夜|喝奶茶|来杯咖啡"
+      ],
+      "daily_cap": 10
+    },
+    {
+      "id": "rest",
+      "label": "休息",
+      "tone": "positive",
+      "deltas": {
+        "energy": 1,
+        "stress": -0.6
+      },
+      "patterns": [
+        "(?i)睡了|睡觉|休息|下班|摸鱼"
+      ],
+      "daily_cap": 10
+    },
+    {
+      "id": "argue",
+      "label": "起了争执",
+      "tone": "negative",
+      "deltas": {
+        "stress": 2,
+        "valence": -1,
+        "patience": -1
+      },
+      "patterns": [
+        "(?i)吵什么|别说了|闭嘴|烦不烦|无语|服了"
+      ],
+      "daily_cap": 10,
+      "strong": true
+    },
+    {
+      "id": "complaint",
+      "label": "抱怨",
+      "tone": "negative",
+      "deltas": {
+        "stress": 1.2,
+        "valence": -0.8
+      },
+      "patterns": [
+        "(?i)好累|累死|烦死|难受|崩溃|加班|压力好大"
+      ],
+      "daily_cap": 15
+    },
+    {
+      "id": "apology",
+      "label": "道歉",
+      "tone": "neutral",
+      "deltas": {
+        "stress": 0.5,
+        "valence": -0.2,
+        "closeness": 0.2
+      },
+      "patterns": [
+        "(?i)抱歉|对不起|不好意思|是我的错"
+      ],
+      "daily_cap": 10
+    },
+    {
+      "id": "busy",
+      "label": "赶时间",
+      "tone": "negative",
+      "deltas": {
+        "energy": -0.8,
+        "stress": 0.8
+      },
+      "patterns": [
+        "(?i)在忙|赶时间|来不及|稍后说|晚点聊|开会"
+      ],
+      "daily_cap": 15
+    }
+  ],
+  "injection": {
+    "self_talk": "这只是此刻的底色，不是话题；别把情绪说出来，也别拿它当借口。",
+    "fragments": {
+      "valence": {
+        "low": [
+          "心里有点沉，说话会收着点",
+          "兴致不太高，不想硬找话题"
+        ],
+        "mid": [
+          "心情跟平常差不多",
+          "情绪平稳，没什么起伏"
+        ],
+        "high": [
+          "心情不错，语气会轻快一点",
+          "有点小开心，愿意多接两句"
+        ]
+      },
+      "energy": {
+        "low": [
+          "人有点乏，句子会更短",
+          "精力不太够，不想主动展开"
+        ],
+        "mid": [
+          "精力一般，够正常聊",
+          "状态普通，不紧不慢"
+        ],
+        "high": [
+          "精神头足，愿意多说一点",
+          "状态在线，接话会积极些"
+        ]
+      },
+      "stress": {
+        "low": [
+          "没什么事压着，节奏从容",
+          "心里挺松的，不急"
+        ],
+        "mid": [
+          "有点事挂着，但不至于急",
+          "稍微绷着，还能稳住"
+        ],
+        "high": [
+          "心里绷着一根弦，容易没耐心",
+          "压力有点大，别催我"
+        ]
+      },
+      "closeness": {
+        "low": [
+          "还在客气阶段，保持一点距离",
+          "不算熟，用词会稳一点"
+        ],
+        "mid": [
+          "算认识了，正常聊",
+          "有点熟，不用太见外"
+        ],
+        "high": [
+          "挺熟的了，可以放松一点",
+          "不用客套，说话直接些"
+        ]
+      },
+      "patience": {
+        "low": [
+          "耐心不多，别绕弯子",
+          "这会不会反复解释"
+        ],
+        "mid": [
+          "耐心正常，能听人说完",
+          "不急不慢，能接住"
+        ],
+        "high": [
+          "挺有耐心，可以慢慢说",
+          "愿意多解释一句"
+        ]
+      }
+    },
+    "time_fragments": {
+      "night": [
+        "现在是深夜，对方可能在熬夜：回短一点、轻一点",
+        "夜里了，别拖着人聊太久"
+      ],
+      "dawn": [
+        "天快亮了，安静一点",
+        "清晨人少，语气放轻"
+      ],
+      "morning": [
+        "早上，语气清爽一点",
+        "刚开工，节奏利落些"
+      ],
+      "noon": [
+        "中午，大家可能边吃边聊",
+        "午间，别写太长"
+      ],
+      "afternoon": [
+        "下午，容易犯困：简短些",
+        "下午时段，回复别太密"
+      ],
+      "evening": [
+        "晚上了，语气可以松弛一点",
+        "晚间，适合正常聊两句"
+      ]
+    }
+  },
+  "behavior": {
+    "bands": [
+      {
+        "when": "energy<25",
+        "max_chars_factor": 0.65,
+        "max_segments": 1,
+        "humanize_scale": 1.35,
+        "silence_boost": 0.12,
+        "initiative_factor": 0.4,
+        "tone": "low_battery"
+      },
+      {
+        "when": "valence<25",
+        "max_chars_factor": 0.7,
+        "max_segments": 1,
+        "humanize_scale": 1.2,
+        "silence_boost": 0.15,
+        "initiative_factor": 0.3,
+        "tone": "low"
+      },
+      {
+        "when": "stress>70",
+        "max_chars_factor": 0.85,
+        "max_segments": 2,
+        "humanize_scale": 1.1,
+        "silence_boost": 0.05,
+        "initiative_factor": 0.6,
+        "tone": "tense"
+      },
+      {
+        "when": "energy<40",
+        "max_chars_factor": 0.8,
+        "max_segments": 2,
+        "humanize_scale": 1.15,
+        "silence_boost": 0.05,
+        "initiative_factor": 0.7,
+        "tone": "tired"
+      },
+      {
+        "when": "valence>75",
+        "max_chars_factor": 1,
+        "max_segments": 0,
+        "humanize_scale": 0.95,
+        "silence_boost": 0,
+        "initiative_factor": 1.15,
+        "tone": "up"
+      }
+    ]
+  },
+  "presets": [
+    {
+      "id": "calm",
+      "name": "平静",
+      "dims": {
+        "valence": 60,
+        "energy": 55,
+        "stress": 25,
+        "closeness": 50,
+        "patience": 65
+      }
+    },
+    {
+      "id": "focused",
+      "name": "专注",
+      "dims": {
+        "valence": 65,
+        "energy": 65,
+        "stress": 40,
+        "closeness": 45,
+        "patience": 75
+      }
+    },
+    {
+      "id": "cheerful",
+      "name": "轻快",
+      "dims": {
+        "valence": 80,
+        "energy": 70,
+        "stress": 30,
+        "closeness": 55,
+        "patience": 70
+      }
+    },
+    {
+      "id": "low_battery",
+      "name": "电量不足",
+      "dims": {
+        "valence": 45,
+        "energy": 20,
+        "stress": 55,
+        "closeness": 45,
+        "patience": 45
+      }
+    }
+  ]
+}

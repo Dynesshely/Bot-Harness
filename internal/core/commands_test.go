@@ -366,26 +366,29 @@ func TestHelpCommandListsEveryCommandOnce(t *testing.T) {
 	}
 
 	lines := strings.Split(reply, "\n")
-	if len(lines) != 6 {
+	if len(lines) != 7 {
 		t.Fatalf("help lines = %#v", lines)
 	}
-	// 按 name 排序：help < human-status < tokenstats < zeta。
+	// 按 name 排序：help < human-status < mood < tokenstats < zeta。
 	if lines[1] != "/help — 查看可用命令" {
 		t.Fatalf("help line = %q", lines[1])
 	}
 	if lines[2] != "/human-status [人数] — 分析最近24h发言者状态（仅管理员）" {
 		t.Fatalf("human-status line = %q", lines[2])
 	}
-	if lines[3] != "/tokenstats [on|off|status] — 开关 token 用量统计（仅管理员）" {
-		t.Fatalf("tokenstats line = %q", lines[3])
+	if lines[3] != "/mood [status|pause 分钟|resume|preset 名称|reset] — 查看或调整当前会话情绪（仅管理员）" {
+		t.Fatalf("mood line = %q", lines[3])
 	}
-	if lines[4] != "/zeta [x] — 测试命令（仅管理员）" {
-		t.Fatalf("zeta line = %q", lines[4])
+	if lines[4] != "/tokenstats [on|off|status] — 开关 token 用量统计（仅管理员）" {
+		t.Fatalf("tokenstats line = %q", lines[4])
+	}
+	if lines[5] != "/zeta [x] — 测试命令（仅管理员）" {
+		t.Fatalf("zeta line = %q", lines[5])
 	}
 	// 末行说明面板点击路径：不带斜杠的单命令名等价于默认动作。
-	if !strings.Contains(lines[5], "tokenstats") || !strings.Contains(lines[5], "/tokenstats status") ||
-		!strings.Contains(lines[5], "不带斜杠") {
-		t.Fatalf("面板点击说明缺失或不清楚：%q", lines[5])
+	if !strings.Contains(lines[6], "tokenstats") || !strings.Contains(lines[6], "/tokenstats status") ||
+		!strings.Contains(lines[6], "不带斜杠") {
+		t.Fatalf("面板点击说明缺失或不清楚：%q", lines[6])
 	}
 	if strings.Contains(reply, "／") {
 		t.Fatalf("help must use ASCII slashes only: %q", reply)

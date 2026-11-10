@@ -169,6 +169,12 @@ func (d *Dispatcher) checkGroup(ctx context.Context, s settings.Settings, groupO
 		d.saveProactiveState(ctx, state)
 		return
 	}
+	// 心情/精力低的时候少主动开口：只按概率降频，不动额度与其它门。
+	if d.affectInitiativeSkip(ctx, groupOpenID, now) {
+		d.log.Debug("proactive skipped by affect initiative", "component", "proactive",
+			"group", groupOpenID)
+		return
+	}
 
 	// 最近半小时没人说话就不插嘴：不打断冷场。
 	busySince, err := d.st.CountHumanMessagesSince(ctx, groupOpenID, now.Add(-proactiveActivityWindow))
@@ -185,6 +191,12 @@ func (d *Dispatcher) checkGroup(ctx context.Context, s settings.Settings, groupO
 	if strings.TrimSpace(text) == "" {
 		d.log.Debug("proactive reflection chose silence", "component", "proactive",
 			"group", groupOpenID, "why", why)
+		return
+	}
+	// 发送前的最后一道心情闸：能量/心情太低或暂停中就不打扰。
+	if skip, why := d.affectProactiveSkip(ctx, groupOpenID, now); skip {
+		d.log.Debug("proactive skipped by affect", "component", "proactive",
+			"group", groupOpenID, "reason", why)
 		return
 	}
 

@@ -9,7 +9,7 @@ import (
 
 // groupOverrideFieldCount is the number of JSON fields on GroupOverride. Bumping
 // it is a reminder to extend overrideIsEmpty (and the manifest) as well.
-const groupOverrideFieldCount = 16
+const groupOverrideFieldCount = 18
 
 func boolPtr(v bool) *bool { return &v }
 
@@ -41,6 +41,8 @@ func TestOverrideIsEmptyCoversEveryGroupOverrideField(t *testing.T) {
 		{"tasks", GroupOverride{Tasks: boolPtr(false)}},
 		{"memory", GroupOverride{Memory: boolPtr(false)}},
 		{"humanize", GroupOverride{Humanize: strPtr("strong")}},
+		{"affect", GroupOverride{Affect: boolPtr(false)}},
+		{"affect_inject_mode", GroupOverride{AffectInjectMode: strPtr("full")}},
 		{"polish", GroupOverride{Polish: boolPtr(false)}},
 		{"web", GroupOverride{Web: boolPtr(false)}},
 		{"exec", GroupOverride{Exec: boolPtr(true)}},
@@ -70,6 +72,7 @@ func TestClearingQuoteReplyKeepsOtherPerGroupSettings(t *testing.T) {
 		{"tasks", `"tasks":false`, GroupOverride{Tasks: boolPtr(false)}},
 		{"memory", `"memory":false`, GroupOverride{Memory: boolPtr(false)}},
 		{"humanize", `"humanize":"strong"`, GroupOverride{Humanize: strPtr("strong")}},
+		{"affect", `"affect":false`, GroupOverride{Affect: boolPtr(false)}},
 		{"polish", `"polish":false`, GroupOverride{Polish: boolPtr(false)}},
 		{"web", `"web":false`, GroupOverride{Web: boolPtr(false)}},
 		{"exec", `"exec":true`, GroupOverride{Exec: boolPtr(true)}},
@@ -167,7 +170,7 @@ func TestPerGroupLevelsAreValidated(t *testing.T) {
 	}
 }
 
-// Apply 一份带全部 15 个字段的按群覆盖，读出来必须一个都不少（前端配置面完整性）。
+// Apply 一份带全部 17 个字段的按群覆盖，读出来必须一个都不少（前端配置面完整性）。
 func TestGroupOverrideRoundTripsAllFields(t *testing.T) {
 	m, st := newManager(t, false)
 	ctx := context.Background()
@@ -184,6 +187,8 @@ func TestGroupOverrideRoundTripsAllFields(t *testing.T) {
 		"tasks":false,
 		"memory":false,
 		"humanize":"strong",
+		"affect":false,
+		"affect_inject_mode":"full",
 		"polish":false,
 		"web":false,
 		"exec":true,
@@ -213,6 +218,10 @@ func TestGroupOverrideRoundTripsAllFields(t *testing.T) {
 			ov.Humanize == nil || *ov.Humanize != "strong" {
 			t.Fatalf("档位字段丢失：%#v", ov)
 		}
+		if ov.Affect == nil || *ov.Affect ||
+			ov.AffectInjectMode == nil || *ov.AffectInjectMode != "full" {
+			t.Fatalf("affect 字段丢失：%#v", ov)
+		}
 		if ov.Exec == nil || !*ov.Exec {
 			t.Fatalf("exec 字段丢失：%#v", ov)
 		}
@@ -227,7 +236,7 @@ func TestGroupOverrideRoundTripsAllFields(t *testing.T) {
 	}
 	check(t, got[0])
 
-	// 落库再读回：16 个字段都得在。
+	// 落库再读回：18 个字段都得在。
 	reloaded, err := New(ctx, st, Defaults())
 	if err != nil {
 		t.Fatalf("reload: %v", err)
