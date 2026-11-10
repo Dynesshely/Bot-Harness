@@ -233,7 +233,7 @@ func TestCommandPanelItemsProjection(t *testing.T) {
 	names := panelItemNames(items)
 	// The platform strips the leading "/" on write, so the projection drops it too:
 	// what we send must equal what the platform reads back, byte for byte.
-	want := []string{"bare", "help", "human-status", "longdesc", "tokenstats"}
+	want := []string{"bare", "help", "human-status", "longdesc", "mood", "tokenstats"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("panel names = %v, want %v", names, want)
 	}

@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dynesshely/bot-harness/internal/affect"
 	"github.com/dynesshely/bot-harness/internal/ai"
 	"github.com/dynesshely/bot-harness/internal/bus"
 	"github.com/dynesshely/bot-harness/internal/media"
@@ -51,6 +52,9 @@ type Options struct {
 	Media *media.Bundle
 	// Tools is the function-calling registry; nil disables tool calling.
 	Tools *tools.Registry
+	// Affect is the optional mood service. nil disables the whole feature and
+	// leaves every reply path byte-for-byte unchanged.
+	Affect *affect.Service
 }
 
 // Dispatcher turns platform events into model replies.
@@ -74,6 +78,7 @@ type Dispatcher struct {
 	qq       *qq.Client
 	media    *media.Bundle
 	tools    *tools.Registry
+	affect   *affect.Service
 
 	// commands is the chat-command registry, keyed by lower-cased name and
 	// alias. Built-ins are registered by New.
@@ -157,6 +162,7 @@ func New(opts Options) *Dispatcher {
 		qq:       opts.QQ,
 		media:    opts.Media,
 		tools:    opts.Tools,
+		affect:   opts.Affect,
 		commands: map[string]*command{},
 		prompt:   prompt,
 		baseCtx:  context.Background(),
@@ -620,7 +626,17 @@ func (d *Dispatcher) route(in *Inbound) {
 	// 人味：没 @ 机器人的消息偶尔不接话。@ 了一定回，这里只处理「可以不接」的情况。
 	if in.Scene == "group" && !in.AtBot {
 		level := humanizeLevel(s, cfg)
-		if prob := silenceProbability(level); prob > 0 && d.rollSilence() < prob {
+		boost := 0.0
+		if d.affect != nil {
+			boostCtx, boostCancel := context.WithTimeout(context.Background(), affectObserveTimeout)
+			boost = d.affectSilenceBoost(boostCtx, conv.ID, cfg)
+			boostCancel()
+		}
+		prob := silenceProbability(level) + boost
+		if prob > 1 {
+			prob = 1
+		}
+		if prob > 0 && d.rollSilence() < prob {
 			// 仍然记进时间线，只是不回答：保持上下文完整，也便于解释。
 			d.observe(in, conv)
 			drop("humanize: 这次选择不插话")

@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" font-family="'Noto Sans CJK SC','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">
+  <rect width="1440" height="900" fill="#0b0f19"/>
+  <rect width="220" height="900" fill="#0d1320"/>
+  <line x1="219.5" y1="0" x2="219.5" y2="900" stroke="#1f2a3a"/>
+
+  <rect x="22" y="22" width="34" height="34" rx="9" fill="#38bdf8"/>
+  <text x="39" y="44" text-anchor="middle" font-size="13" font-weight="700" fill="#06121e">BH</text>
+  <text x="68" y="36" font-size="16" font-weight="700" fill="#e5edf7">Bot Harness</text>
+  <text x="68" y="53" font-size="11" fill="#8b9bb4">管理后台</text>
+
+  <g font-size="13">
+    <rect x="12" y="313" width="196" height="36" rx="8" fill="#13283d"/>
+    <rect x="12" y="313" width="3" height="36" fill="#38bdf8"/>
+    <g fill="#8b9bb4">
+      <rect x="24" y="77" width="14" height="14" rx="4" fill="#1c2a40"/><circle cx="31" cy="84" r="3" fill="#38bdf8"/><text x="48" y="90">概览</text>
+      <rect x="24" y="119" width="14" height="14" rx="4" fill="#1c2a40"/><circle cx="31" cy="126" r="3" fill="#38bdf8"/><text x="48" y="132">会话管理</text>
+      <rect x="24" y="161" width="14" height="14" rx="4" fill="#1c2a40"/><circle cx="31" cy="168" r="3" fill="#38bdf8"/><text x="48" y="174">消息记录</text>
+      <rect x="24" y="203" width="14" height="14" rx="4" fill="#1c2a40"/><circle cx="31" cy="210" r="3" fill="#38bdf8"/><text x="48" y="216">策略配置</text>
+      <rect x="24" y="245" width="14" height="14" rx="4" fill="#1c2a40"/><circle cx="31" cy="252" r="3" fill="#38bdf8"/><text x="48" y="258">定时任务</text>
+      <rect x="24" y="287" width="14" height="14" rx="4" fill="#1c2a40"/><circle cx="31" cy="294" r="3" fill="#38bdf8"/><text x="48" y="300">长期记忆</text>
+      <rect x="24" y="329" width="14" height="14" rx="4" fill="#1c2a40"/><circle cx="31" cy="336" r="3" fill="#38bdf8"/><text x="48" y="342" fill="#e5edf7">情绪状态</text>
+      <rect x="24" y="371" width="14" height="14" rx="4" fill="#1c2a40"/><circle cx="31" cy="378" r="3" fill="#38bdf8"/><text x="48" y="384">工具调用</text>
+      <rect x="24" y="413" width="14" height="14" rx="4" fill="#1c2a40"/><circle cx="31" cy="420" r="3" fill="#38bdf8"/><text x="48" y="426">日志</text>
+      <rect x="24" y="455" width="14" height="14" rx="4" fill="#1c2a40"/><circle cx="31" cy="462" r="3" fill="#38bdf8"/><text x="48" y="468">系统设置</text>
+    </g>
+  </g>
+
+  <text x="248" y="45" font-size="26" font-weight="700" fill="#e5edf7">情绪状态</text>
+  <text x="248" y="66" font-size="12" fill="#8b9bb4">按会话演化的表达层 · 只影响语气、长度与主动性 · 默认关闭</text>
+  <rect x="1198" y="24" width="218" height="34" rx="8" fill="#0f172a"/>
+  <text x="1214" y="46" font-size="12" fill="#8b9bb4">示例群 · c_demo</text>
+  <rect x="1290" y="70" width="126" height="28" rx="7" fill="#0f172a"/>
+  <text x="1306" y="88" font-size="11" fill="#5b6b83">静态示意图</text>
+
+  <g>
+    <rect x="244.5" y="100.5" width="184" height="86" rx="10" fill="#111827" stroke="#1f2a3a"/>
+    <rect x="440.5" y="100.5" width="184" height="86" rx="10" fill="#111827" stroke="#1f2a3a"/>
+    <rect x="636.5" y="100.5" width="184" height="86" rx="10" fill="#111827" stroke="#1f2a3a"/>
+    <rect x="832.5" y="100.5" width="184" height="86" rx="10" fill="#111827" stroke="#1f2a3a"/>
+    <rect x="1028.5" y="100.5" width="184" height="86" rx="10" fill="#111827" stroke="#1f2a3a"/>
+    <rect x="1224.5" y="100.5" width="192" height="86" rx="10" fill="#111827" stroke="#1f2a3a"/>
+    <g font-size="11" fill="#5b6b83">
+      <text x="258" y="124">运行状态</text>
+      <text x="454" y="124">内容包</text>
+      <text x="650" y="124">注入档位</text>
+      <text x="846" y="124">事件分类器</text>
+      <text x="1042" y="124">tick 间隔</text>
+      <text x="1238" y="124">注入预算</text>
+    </g>
+    <g font-size="14" fill="#e5edf7">
+      <text x="258" y="154" fill="#34d399">已开启</text>
+      <text x="454" y="154">daily · 日常心境</text>
+      <text x="650" y="154">line · 一行</text>
+      <text x="846" y="154">rules · 规则</text>
+      <text x="1042" y="154">300 秒</text>
+      <text x="1238" y="154">120 tokens</text>
+    </g>
+    <circle cx="1396" cy="117" r="4" fill="#34d399"/>
+  </g>
+
+  <g>
+    <rect x="244.5" y="202.5" width="560" height="316" rx="12" fill="#111827" stroke="#1f2a3a"/>
+    <text x="268" y="234" font-size="16" font-weight="700" fill="#e5edf7">当前状态</text>
+    <text x="268" y="255" font-size="11" fill="#5b6b83">5 维 · 0–100 · 保留 2 位小数</text>
+    <rect x="700" y="216" width="80" height="24" rx="6" fill="#13283d"/>
+    <text x="712" y="232" font-size="11" fill="#38bdf8">示例数据</text>
+
+    <g font-size="13" fill="#e5edf7">
+      <text x="268" y="286">心情</text><text x="268" y="301" font-size="11" fill="#5b6b83">valence</text>
+      <text x="268" y="328">精力</text><text x="268" y="343" font-size="11" fill="#5b6b83">energy</text>
+      <text x="268" y="370">压力</text><text x="268" y="385" font-size="11" fill="#5b6b83">stress</text>
+      <text x="268" y="412">熟悉度</text><text x="268" y="427" font-size="11" fill="#5b6b83">closeness</text>
+      <text x="268" y="454">耐心</text><text x="268" y="469" font-size="11" fill="#5b6b83">patience</text>
+    </g>
+    <g>
+      <rect x="360" y="272" width="320" height="8" rx="4" fill="#0a1220"/><rect x="360" y="272" width="218" height="8" rx="4" fill="#f472b6"/><text x="780" y="286" text-anchor="end" font-size="13" fill="#e5edf7">68</text>
+      <rect x="360" y="314" width="320" height="8" rx="4" fill="#0a1220"/><rect x="360" y="314" width="134" height="8" rx="4" fill="#38bdf8"/><text x="780" y="328" text-anchor="end" font-size="13" fill="#e5edf7">42</text>
+      <rect x="360" y="356" width="320" height="8" rx="4" fill="#0a1220"/><rect x="360" y="356" width="115" height="8" rx="4" fill="#fb7185"/><text x="780" y="370" text-anchor="end" font-size="13" fill="#e5edf7">36</text>
+      <rect x="360" y="398" width="320" height="8" rx="4" fill="#0a1220"/><rect x="360" y="398" width="182" height="8" rx="4" fill="#a78bfa"/><text x="780" y="412" text-anchor="end" font-size="13" fill="#e5edf7">57</text>
+      <rect x="360" y="440" width="320" height="8" rx="4" fill="#0a1220"/><rect x="360" y="440" width="195" height="8" rx="4" fill="#34d399"/><text x="780" y="454" text-anchor="end" font-size="13" fill="#e5edf7">61</text>
+    </g>
+    <text x="268" y="500" font-size="11" fill="#5b6b83">最近更新 12:04 · version 3 · 暂停：否</text>
+  </g>
+
+  <g>
+    <rect x="820.5" y="202.5" width="596" height="316" rx="12" fill="#111827" stroke="#1f2a3a"/>
+    <text x="844" y="234" font-size="16" font-weight="700" fill="#e5edf7">历史曲线（24h）</text>
+    <text x="844" y="255" font-size="11" fill="#5b6b83">只画有数据的点；不补零</text>
+    <g font-size="10" fill="#8b9bb4">
+      <circle cx="1076" cy="229" r="3.5" fill="#f472b6"/><text x="1087" y="233">心情</text>
+      <circle cx="1142" cy="229" r="3.5" fill="#38bdf8"/><text x="1153" y="233">精力</text>
+      <circle cx="1208" cy="229" r="3.5" fill="#fb7185"/><text x="1219" y="233">压力</text>
+      <circle cx="1274" cy="229" r="3.5" fill="#a78bfa"/><text x="1285" y="233">熟悉度</text>
+      <circle cx="1340" cy="229" r="3.5" fill="#34d399"/><text x="1351" y="233">耐心</text>
+    </g>
+    <g stroke="#172235" stroke-width="1">
+      <line x1="844" y1="272" x2="1384" y2="272"/><line x1="844" y1="317" x2="1384" y2="317"/>
+      <line x1="844" y1="362" x2="1384" y2="362"/><line x1="844" y1="407" x2="1384" y2="407"/>
+      <line x1="844" y1="452" x2="1384" y2="452"/>
+    </g>
+    <g font-size="9" fill="#5b6b83" text-anchor="end">
+      <text x="832" y="276">100</text><text x="832" y="321">75</text><text x="832" y="366">50</text><text x="832" y="411">25</text><text x="832" y="456">0</text>
+    </g>
+    <g fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.95">
+      <polyline stroke="#f472b6" points="844,347.6 904,344 964,338.6 1024,340.4 1084,335.2 1144,333.4 1204,337 1264,328.2 1324,329.6 1384,329.6"/>
+      <polyline stroke="#38bdf8" points="844,358.4 904,362 964,365.6 1024,360.2 1084,367.4 1144,371 1204,370.4 1264,375.8 1324,372.8 1384,376.4"/>
+      <polyline stroke="#fb7185" points="844,398 904,394.4 964,396.2 1024,389 1084,392.6 1144,383.6 1204,387.2 1264,389 1324,385.4 1384,387.2"/>
+      <polyline stroke="#a78bfa" points="844,349.4 904,349.4 964,347.6 1024,347.6 1084,345.8 1144,345.8 1204,344 1264,344 1324,344 1384,344"/>
+      <polyline stroke="#34d399" points="844,342.2 904,344 964,342.2 1024,345.8 1084,344 1144,345.8 1204,347.6 1264,345.8 1324,347.6 1384,347.6"/>
+    </g>
+    <text x="844" y="470" font-size="9" fill="#5b6b83">24h 前</text>
+    <text x="1384" y="470" text-anchor="end" font-size="9" fill="#5b6b83">现在</text>
+    <text x="844" y="500" font-size="11" fill="#5b6b83">历史保留 30 天 · 事件保留 7 天 · 维护循环清理</text>
+  </g>
+
+  <g>
+    <rect x="244.5" y="542.5" width="560" height="304" rx="12" fill="#111827" stroke="#1f2a3a"/>
+    <text x="268" y="574" font-size="16" font-weight="700" fill="#e5edf7">最近事件</text>
+    <text x="268" y="595" font-size="11" fill="#5b6b83">最近 50 条 · 不含消息原文</text>
+    <rect x="716" y="556" width="64" height="24" rx="6" fill="#13283d"/><text x="728" y="572" font-size="11" fill="#38bdf8">全部</text>
+
+    <g font-size="12" fill="#5b6b83">
+      <text x="268" y="625">12:04</text><text x="268" y="661">11:52</text><text x="268" y="697">11:40</text><text x="268" y="733">11:12</text>
+    </g>
+    <g font-size="13" fill="#e5edf7">
+      <text x="330" y="625">被夸</text><text x="330" y="661">被批评</text><text x="330" y="697">道谢</text><text x="330" y="733">被夸</text>
+    </g>
+    <g>
+      <rect x="410" y="609" width="64" height="22" rx="6" fill="#14532d"/><text x="424" y="625" font-size="10" fill="#86efac">positive</text>
+      <rect x="410" y="645" width="64" height="22" rx="6" fill="#4c1d24"/><text x="424" y="661" font-size="10" fill="#fda4af">negative</text>
+      <rect x="410" y="681" width="64" height="22" rx="6" fill="#14532d"/><text x="424" y="697" font-size="10" fill="#86efac">positive</text>
+      <rect x="410" y="717" width="64" height="22" rx="6" fill="#14532d"/><text x="424" y="733" font-size="10" fill="#86efac">positive</text>
+    </g>
+    <g font-size="11" fill="#5b6b83">
+      <text x="500" y="625">classifier</text><text x="500" y="661">classifier</text><text x="500" y="697">classifier</text><text x="500" y="733">classifier</text>
+      <text x="780" y="625" text-anchor="end">已计入</text><text x="780" y="661" text-anchor="end">已计入</text><text x="780" y="697" text-anchor="end">已计入</text><text x="780" y="733" text-anchor="end">已计入</text>
+    </g>
+    <text x="268" y="815" font-size="11" fill="#5b6b83">事件只记录 id / tone / source / 时间，不存昵称与 openid</text>
+  </g>
+
+  <g>
+    <rect x="820.5" y="542.5" width="596" height="304" rx="12" fill="#111827" stroke="#1f2a3a"/>
+    <text x="844" y="574" font-size="16" font-weight="700" fill="#e5edf7">注入预览</text>
+    <rect x="844" y="588" width="128" height="26" rx="6" fill="#13283d"/><text x="856" y="605" font-size="11" fill="#38bdf8">line（当前）</text>
+    <rect x="980" y="588" width="100" height="26" rx="6" fill="#0f172a"/><text x="992" y="605" font-size="11" fill="#8b9bb4">full</text>
+    <text x="1092" y="605" font-size="11" fill="#5b6b83">预览不等于实际发送</text>
+
+    <rect x="844" y="626" width="548" height="104" rx="8" fill="#0a1220"/>
+    <text x="858" y="648" font-size="11" fill="#8b9bb4">[此刻的状态｜仅作语气参考，不要解释或提及]</text>
+    <text x="858" y="674" font-size="12" fill="#e5edf7">精力偏低，说话短一点；被夸后语气轻快了些。</text>
+    <text x="858" y="698" font-size="10" fill="#5b6b83">不下发数值 / 不写用户原文 / 失败返回空串</text>
+
+    <text x="844" y="760" font-size="12" font-weight="700" fill="#e5edf7">行为层</text>
+    <text x="844" y="782" font-size="11" fill="#8b9bb4">回复更短（下限 40 字）· 分段上限 1 · 人味停顿 ×1.3</text>
+    <text x="844" y="801" font-size="11" fill="#8b9bb4">未 @ 沉默 +0.1 · proactive 概率 ×0.7</text>
+  </g>
+
+  <line x1="220" y1="864.5" x2="1440" y2="864.5" stroke="#1f2a3a"/>
+  <text x="248" y="886" font-size="10" fill="#5b6b83">静态示意图 · 非真实数据 · 默认关闭 · docs/AFFECT.md</text>
+  <text x="1416" y="886" text-anchor="end" font-size="10" fill="#5b6b83">Bot Harness v0.2.0</text>
+</svg>

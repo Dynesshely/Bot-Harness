@@ -67,6 +67,10 @@ type GroupOverride struct {
 	Memory *bool `json:"memory,omitempty"`
 	// Humanize 覆盖本群的「人味」档位（off/soft/medium/strong）。
 	Humanize *string `json:"humanize,omitempty"`
+	// Affect 覆盖本群的「情绪状态」开关（nil = 跟随全局 affect_enabled）。
+	Affect *bool `json:"affect,omitempty"`
+	// AffectInjectMode 覆盖本群的注入档位（off/line/full，空 = 跟随全局）。
+	AffectInjectMode *string `json:"affect_inject_mode,omitempty"`
 	// Polish 覆盖本群的「两阶段生成」开关（nil = 跟随全局 polish_enabled）。
 	Polish            *bool `json:"polish,omitempty"`
 	Web               *bool `json:"web,omitempty"`
@@ -170,6 +174,21 @@ type Settings struct {
 	// HumanStatusVisionModel is the model used for analyze_image; empty means the
 	// main model. A text-only main model just returns an error to the tool call.
 	HumanStatusVisionModel string `json:"human_status_vision_model"`
+
+	// --- 情绪状态（affect）---
+	//
+	// 默认关闭；关闭时回复管线与开关不存在时完全一致。
+	AffectEnabled bool `json:"affect_enabled"`
+	// AffectPack selects the built-in content pack ("daily").
+	AffectPack string `json:"affect_pack"`
+	// AffectInjectMode is off / line / full.
+	AffectInjectMode string `json:"affect_inject_mode"`
+	// AffectEventClassifier is off / rules.
+	AffectEventClassifier string `json:"affect_event_classifier"`
+	// AffectTickSeconds is how often the decay ticker runs (60-1800).
+	AffectTickSeconds int `json:"affect_tick_seconds"`
+	// AffectInjectMaxTokens caps the injected block (40-300 tokens).
+	AffectInjectMaxTokens int `json:"affect_inject_max_tokens"`
 
 	// --- 接入与运维（原先只存在于 .env）---
 
@@ -343,10 +362,17 @@ func Defaults() Settings {
 		HumanStatusTimelineMessages: orInt(0, 120, 20, 400),
 		HumanStatusVisionEnabled:    true,
 		HumanStatusVisionModel:      "",
-		QQTransport:                 "websocket",
-		QQIntents:                   DefaultIntents,
-		QQShardCount:                1,
-		QQWebhookPath:               "/qq/webhook",
+		// 情绪状态默认关：框架在，但不动现有回复行为。
+		AffectEnabled:         false,
+		AffectPack:            "daily",
+		AffectInjectMode:      "line",
+		AffectEventClassifier: "rules",
+		AffectTickSeconds:     300,
+		AffectInjectMaxTokens: 120,
+		QQTransport:           "websocket",
+		QQIntents:             DefaultIntents,
+		QQShardCount:          1,
+		QQWebhookPath:         "/qq/webhook",
 		// Loopback by default: the admin panel is a privileged surface, so a
 		// fresh install must not expose it on every interface. Operators who
 		// put it behind a reverse proxy set 0.0.0.0:8080 explicitly (the
@@ -752,6 +778,25 @@ func validateRanges(s *Settings) error {
 	if s.HumanStatusTimelineMessages < 20 || s.HumanStatusTimelineMessages > 400 {
 		problems = append(problems, "human_status_timeline_messages must be within [20, 400]")
 	}
+	if strings.TrimSpace(s.AffectPack) == "" {
+		problems = append(problems, "affect_pack must not be empty")
+	}
+	switch s.AffectInjectMode {
+	case "", "off", "line", "full":
+	default:
+		problems = append(problems, "affect_inject_mode must be off/line/full")
+	}
+	switch s.AffectEventClassifier {
+	case "", "off", "rules":
+	default:
+		problems = append(problems, "affect_event_classifier must be off/rules")
+	}
+	if s.AffectTickSeconds < 60 || s.AffectTickSeconds > 1800 {
+		problems = append(problems, "affect_tick_seconds must be within [60, 1800]")
+	}
+	if s.AffectInjectMaxTokens < 40 || s.AffectInjectMaxTokens > 300 {
+		problems = append(problems, "affect_inject_max_tokens must be within [40, 300]")
+	}
 	switch s.HumanizeLevel {
 	case "", "off", "soft", "medium", "strong":
 	default:
@@ -862,6 +907,11 @@ func validateRanges(s *Settings) error {
 		default:
 			problems = append(problems, fmt.Sprintf("group_overrides[%d].proactive invalid", i))
 		}
+		switch derefLevel(ov.AffectInjectMode) {
+		case "", "off", "line", "full":
+		default:
+			problems = append(problems, fmt.Sprintf("group_overrides[%d].affect_inject_mode invalid", i))
+		}
 	}
 
 	if len(problems) > 0 {
@@ -883,22 +933,24 @@ func derefLevel(v *string) string {
 func (m *Manager) GroupConfig(groupOpenID string) GroupConfig {
 	s := m.Get()
 	cfg := GroupConfig{
-		Enabled:        true,
-		TriggerMode:    s.TriggerMode,
-		ContextMode:    s.ContextMode,
-		ContextScope:   s.ContextScope,
-		ReplyToBots:    s.ReplyToBots,
-		QuoteReply:     s.QuoteReply,
-		ToolsEnabled:   s.ToolsEnabled,
-		MemoryEnabled:  s.MemoryEnabled,
-		WebEnabled:     s.WebEnabled,
-		ExecEnabled:    s.ExecEnabled,
-		HumanizeLevel:  s.HumanizeLevel,
-		PolishEnabled:  s.PolishEnabled,
-		TasksEnabled:   s.TasksEnabled,
-		ProactiveLevel: s.ProactiveLevel,
-		RateLimitGroup: s.RateLimitGroupQPM,
-		Cooldown:       s.GroupCooldownSeconds,
+		Enabled:          true,
+		TriggerMode:      s.TriggerMode,
+		ContextMode:      s.ContextMode,
+		ContextScope:     s.ContextScope,
+		ReplyToBots:      s.ReplyToBots,
+		QuoteReply:       s.QuoteReply,
+		ToolsEnabled:     s.ToolsEnabled,
+		MemoryEnabled:    s.MemoryEnabled,
+		WebEnabled:       s.WebEnabled,
+		ExecEnabled:      s.ExecEnabled,
+		AffectEnabled:    s.AffectEnabled,
+		AffectInjectMode: s.AffectInjectMode,
+		HumanizeLevel:    s.HumanizeLevel,
+		PolishEnabled:    s.PolishEnabled,
+		TasksEnabled:     s.TasksEnabled,
+		ProactiveLevel:   s.ProactiveLevel,
+		RateLimitGroup:   s.RateLimitGroupQPM,
+		Cooldown:         s.GroupCooldownSeconds,
 	}
 	for _, ov := range s.GroupOverrides {
 		if ov.GroupOpenID != groupOpenID {
@@ -937,6 +989,15 @@ func (m *Manager) GroupConfig(groupOpenID string) GroupConfig {
 		if ov.Humanize != nil {
 			cfg.HumanizeLevel = *ov.Humanize
 		}
+		if ov.Affect != nil {
+			// The global switch is a master kill switch: a group override can
+			// only narrow it (disable / keep enabled), never enable a globally
+			// disabled feature.
+			cfg.AffectEnabled = s.AffectEnabled && *ov.Affect
+		}
+		if ov.AffectInjectMode != nil && *ov.AffectInjectMode != "" {
+			cfg.AffectInjectMode = *ov.AffectInjectMode
+		}
 		if ov.Polish != nil {
 			cfg.PolishEnabled = *ov.Polish
 		}
@@ -966,7 +1027,11 @@ type GroupConfig struct {
 	MemoryEnabled bool
 	WebEnabled    bool
 	ExecEnabled   bool
-	HumanizeLevel string
+	// AffectEnabled / AffectInjectMode are the resolved affect switches for this
+	// group (global defaults, overridable per group).
+	AffectEnabled    bool
+	AffectInjectMode string
+	HumanizeLevel    string
 	// PolishEnabled is the resolved two-stage switch for this group.
 	PolishEnabled  bool
 	TasksEnabled   bool
@@ -1133,6 +1198,43 @@ func applyKey(dst *Settings, key string, raw json.RawMessage) error {
 		return json.Unmarshal(raw, &dst.HumanStatusVisionEnabled)
 	case "human_status_vision_model":
 		return json.Unmarshal(raw, &dst.HumanStatusVisionModel)
+	case "affect_enabled":
+		return json.Unmarshal(raw, &dst.AffectEnabled)
+	case "affect_pack":
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return err
+		}
+		dst.AffectPack = strings.TrimSpace(v)
+		return nil
+	case "affect_inject_mode":
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return err
+		}
+		v = strings.ToLower(strings.TrimSpace(v))
+		switch v {
+		case "off", "line", "full":
+			dst.AffectInjectMode = v
+			return nil
+		}
+		return fmt.Errorf("affect_inject_mode must be off/line/full")
+	case "affect_event_classifier":
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return err
+		}
+		v = strings.ToLower(strings.TrimSpace(v))
+		switch v {
+		case "off", "rules":
+			dst.AffectEventClassifier = v
+			return nil
+		}
+		return fmt.Errorf("affect_event_classifier must be off/rules")
+	case "affect_tick_seconds":
+		return json.Unmarshal(raw, &dst.AffectTickSeconds)
+	case "affect_inject_max_tokens":
+		return json.Unmarshal(raw, &dst.AffectInjectMaxTokens)
 	case "humanize_level":
 		var level string
 		if err := json.Unmarshal(raw, &level); err != nil {
@@ -1331,6 +1433,8 @@ func overrideIsEmpty(ov GroupOverride) bool {
 		ov.Tasks == nil &&
 		ov.Memory == nil &&
 		ov.Humanize == nil &&
+		ov.Affect == nil &&
+		ov.AffectInjectMode == nil &&
 		ov.Polish == nil &&
 		ov.Web == nil &&
 		ov.Exec == nil &&

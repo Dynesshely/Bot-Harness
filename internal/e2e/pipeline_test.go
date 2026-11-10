@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/dynesshely/bot-harness/internal/admin"
+	"github.com/dynesshely/bot-harness/internal/affect"
 	"github.com/dynesshely/bot-harness/internal/ai"
 	"github.com/dynesshely/bot-harness/internal/bus"
 	"github.com/dynesshely/bot-harness/internal/config"
@@ -50,6 +51,7 @@ type harness struct {
 	dis      *core.Dispatcher
 	st       *store.Store
 	settings *settings.Manager
+	affect   *affect.Service
 	cfg      *config.Config
 	qqClient *qq.Client
 	media    *media.Bundle
@@ -439,6 +441,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("settings: %v", err)
 	}
 	h.settings = sm
+	h.affect = affect.NewService(st, sm, logger, affect.NewMetrics())
 	// 和 main.go 一样：端点与密钥每次请求重新解析，设置面板改了立刻生效。
 	h.client.SetBaseURLResolver(func() string { return sm.Get().OpenAIBaseURL })
 	h.client.SetAPIKeyResolver(func() string { return sm.Get().OpenAIAPIKey })
@@ -465,6 +468,7 @@ func (h *harness) build(sm *settings.Manager) *core.Dispatcher {
 		Prompt:   "你是测试助手",
 		QQ:       h.qqClient,
 		Media:    h.media,
+		Affect:   h.affect,
 		Tools:    tools.Builtins(),
 	})
 	// 测试不需要随机的「不接话」，否则会出现偶发失败。
@@ -836,6 +840,31 @@ func TestReplyIsSentAsPassiveMessage(t *testing.T) {
 	}
 	if len(msgs) != 2 || msgs[0].Role != "user" || msgs[1].Role != "assistant" {
 		t.Fatalf("unexpected stored history %#v", msgs)
+	}
+}
+
+func TestAffectInjectsBlockWhenEnabled(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"affect_enabled":true,"affect_pack":"daily","affect_inject_mode":"full"}`)
+
+	h.dis.HandlePayload(context.Background(), groupAtMessage("M1", "G1", "U1", "小明", "你也太厉害了吧"))
+	h.waitForSent(t, 1)
+
+	probe := h.systemPrompt(t)
+	if !strings.Contains(probe.text, "此刻的状态") {
+		t.Fatalf("affect block missing from the system prompt:\n%s", probe.text)
+	}
+	if !strings.Contains(probe.text, "仅作语气参考") {
+		t.Fatalf("affect block lost its guard line:\n%s", probe.text)
+	}
+}
+
+func TestAffectStaysOffByDefault(t *testing.T) {
+	h := newHarness(t)
+	h.dis.HandlePayload(context.Background(), groupAtMessage("M1", "G1", "U1", "小明", "你也太厉害了吧"))
+	h.waitForSent(t, 1)
+	if probe := h.systemPrompt(t); strings.Contains(probe.text, "此刻的状态") {
+		t.Fatalf("affect must not inject while disabled:\n%s", probe.text)
 	}
 }
 

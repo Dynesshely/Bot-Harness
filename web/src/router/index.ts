@@ -49,6 +49,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '策略配置' },
       },
       {
+        path: 'affect',
+        name: 'affect',
+        component: () => import('@/pages/AffectPage.vue'),
+        meta: { title: '情绪状态' },
+      },
+      {
         path: 'messages',
         name: 'messages',
         component: () => import('@/pages/MessagesPage.vue'),

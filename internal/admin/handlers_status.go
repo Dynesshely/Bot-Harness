@@ -130,9 +130,17 @@ func (s *Server) statusData() map[string]any {
 			"openid_override_configured": identity.FallbackSet,
 		},
 		"store":    s.storeStatus(conversations, messages),
-		"counters": d.Dispatcher.Metrics().Snapshot(),
+		"counters": s.statusCounters(),
 	}
 	return data
+}
+
+// statusCounters renders the counters block, merging the affect service's own
+// totals (see mergeAffectCounters) into the dispatcher snapshot.
+func (s *Server) statusCounters() core.CounterSnapshot {
+	snapshot := s.deps.Dispatcher.Metrics().Snapshot()
+	s.mergeAffectCounters(&snapshot)
+	return snapshot
 }
 
 // storeStatus renders the "store" block of GET /api/status.

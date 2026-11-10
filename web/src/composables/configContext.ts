@@ -78,6 +78,18 @@ export interface EditableDraft {
   human_status_vision_enabled: boolean
   /** 图片分析使用的视觉模型名；空串 = 主模型。 */
   human_status_vision_model: string
+  /** 情绪状态：默认关；关闭时现有行为零变化。 */
+  affect_enabled: boolean
+  /** 情绪内容包 id（默认 daily 日常心境）。 */
+  affect_pack: string
+  /** 情绪注入档位 off / line / full。 */
+  affect_inject_mode: string
+  /** 事件分类器 off / rules。 */
+  affect_event_classifier: string
+  /** 情绪 tick 间隔（秒），60–1800。 */
+  affect_tick_seconds: number
+  /** 单次注入 token 上限，40–300。 */
+  affect_inject_max_tokens: number
   proactive_level: string
   proactive_ratio: number
   proactive_max_credits: number
@@ -178,6 +190,13 @@ export function emptyDraft(): EditableDraft {
     human_status_timeline_messages: 120,
     human_status_vision_enabled: true,
     human_status_vision_model: '',
+    // 情绪状态与后端 Defaults() 对齐：默认关、日常心境、line、rules、300s、120 tokens。
+    affect_enabled: false,
+    affect_pack: 'daily',
+    affect_inject_mode: 'line',
+    affect_event_classifier: 'rules',
+    affect_tick_seconds: 300,
+    affect_inject_max_tokens: 120,
     proactive_level: 'off',
     proactive_ratio: 10,
     proactive_max_credits: 3,
@@ -255,6 +274,8 @@ export type NumericKey =
   | 'human_status_trigger_messages'
   | 'human_status_ttl_minutes'
   | 'human_status_timeline_messages'
+  | 'affect_tick_seconds'
+  | 'affect_inject_max_tokens'
   | 'proactive_ratio'
   | 'proactive_max_credits'
   | 'proactive_quiet_start'
@@ -374,6 +395,13 @@ export function assign(target: EditableDraft, source: EditableConfig | EditableD
   // false 与空串都是真实值（关掉图片分析 / 改回主模型），?? 只挡 undefined / null。
   target.human_status_vision_enabled = source.human_status_vision_enabled ?? true
   target.human_status_vision_model = source.human_status_vision_model ?? ''
+  // 情绪状态：与后端 Defaults() 对齐；false 与空串/默认值都要原样落下。
+  target.affect_enabled = source.affect_enabled ?? false
+  target.affect_pack = source.affect_pack ?? 'daily'
+  target.affect_inject_mode = source.affect_inject_mode ?? 'line'
+  target.affect_event_classifier = source.affect_event_classifier ?? 'rules'
+  target.affect_tick_seconds = source.affect_tick_seconds ?? 300
+  target.affect_inject_max_tokens = source.affect_inject_max_tokens ?? 120
   target.proactive_level = source.proactive_level ?? 'off'
   target.proactive_ratio = source.proactive_ratio ?? 10
   target.proactive_max_credits = source.proactive_max_credits ?? 3
@@ -439,6 +467,8 @@ export const NUMERIC_PATCH_KEYS: readonly NumericKey[] = [
   'human_status_trigger_messages',
   'human_status_ttl_minutes',
   'human_status_timeline_messages',
+  'affect_tick_seconds',
+  'affect_inject_max_tokens',
   'proactive_ratio',
   'proactive_max_credits',
   'proactive_quiet_start',
@@ -585,6 +615,19 @@ export function buildPatch(draft: EditableDraft, base: EditableDraft): Partial<E
   }
   if (draft.human_status_vision_model !== base.human_status_vision_model) {
     changed.human_status_vision_model = draft.human_status_vision_model
+  }
+  // 情绪状态：布尔 false 是真实值（关掉），字符串空串同样照发（清空内容包由后端校验）。
+  if (draft.affect_enabled !== base.affect_enabled) {
+    changed.affect_enabled = draft.affect_enabled
+  }
+  if (draft.affect_pack !== base.affect_pack) {
+    changed.affect_pack = draft.affect_pack
+  }
+  if (draft.affect_inject_mode !== base.affect_inject_mode) {
+    changed.affect_inject_mode = draft.affect_inject_mode as EditableConfig['affect_inject_mode']
+  }
+  if (draft.affect_event_classifier !== base.affect_event_classifier) {
+    changed.affect_event_classifier = draft.affect_event_classifier as EditableConfig['affect_event_classifier']
   }
   if (draft.proactive_level !== base.proactive_level) {
     changed.proactive_level = draft.proactive_level

@@ -11,9 +11,10 @@ export type OverrideBoolKey =
   | 'memory'
   | 'web'
   | 'exec'
+  | 'affect'
 
 /** 可按群覆盖的枚举档位字段（null = 跟随全局）。 */
-export type OverrideLevelKey = 'proactive' | 'humanize'
+export type OverrideLevelKey = 'proactive' | 'humanize' | 'affect_inject_mode'
 
 /**
  * 把「按群覆盖」表格里的草稿行整成提交给后端的形状。
@@ -47,6 +48,8 @@ export function toGroupOverridePayload(rows: readonly GroupOverride[]): GroupOve
     humanize: row.humanize ?? null,
     web: row.web ?? null,
     exec: row.exec ?? null,
+    affect: row.affect ?? null,
+    affect_inject_mode: row.affect_inject_mode ?? null,
     rate_limit_group_qpm: row.rate_limit_group_qpm ?? null,
   }))
 }

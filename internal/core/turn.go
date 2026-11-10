@@ -17,6 +17,10 @@ import (
 func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settings.GroupConfig, conv convTarget, rec *store.Record) {
 	s := d.settings.Effective()
 
+	// 人类消息一进来就顺手分类（150ms 上限）。它只记录状态，不参与本轮决策；
+	// 失败、超时或服务缺失都不影响回复。
+	d.observeAffect(ctx, conv.ID, in.Content)
+
 	// Rate limiting (platform-facing quotas plus our own fairness limits).
 	userKey := "user:" + firstNonEmpty(in.MemberOpenID, in.UserOpenID)
 	if !d.limiter.Allow(userKey, s.RateLimitUserQPM) {
@@ -84,6 +88,10 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	}
 	if block := d.humanStatusBlock(ctx, conv.ID); block != "" {
 		systemPrompt += "\n\n" + block
+	}
+	// 情绪状态排在人类状态之后：先描述"对方此刻怎样"，再描述"我此刻怎样"。
+	if block := d.affectBlock(ctx, conv.ID, s, cfg, time.Now()); block != "" {
+		systemPrompt = appendSystemBlock(systemPrompt, block)
 	}
 	messages := BuildChatMessages(systemPrompt, history, userText, budget)
 
@@ -164,7 +172,10 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 		stagePrompt = final
 	}
 	draft := result.Text
-	polish := d.newPolish(aiCtx, s, cfg, stagePrompt, draft)
+	// 润色阶段只看一行状态：完整注入块已经进了 stage 1 的系统提示词，
+	// 再给润色器一份长文案只会诱导它多写。
+	polishState := d.affectShortLine(ctx, conv.ID, s, cfg, time.Now())
+	polish := d.newPolish(aiCtx, s, cfg, stagePrompt, draft, polishState)
 	// 指标只数「真的发出去的 stage2 请求」与其中「失败回退」的次数：
 	// 跳过（开关关、草稿为空、低于 polish_min_chars）既不算请求也不算失败。
 	if polish.Attempted {
@@ -242,8 +253,11 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	if cfg.QuoteReply {
 		quoteIndex = in.QuoteIndex
 	}
-	sendRes, sendErr := d.deliver(ctx, in, s, deliverText, forceActive, quoteIndex,
-		humanizeLevel(s, cfg), start)
+	// 行为参数只改**本轮副本**：上限、分段、人味节奏都跟着当下的状态走，
+	// 但绝不回写全局 settings。
+	deliverySettings, deliveryLevel := applyAffectBehavior(s, cfg, d.affectBehavior(ctx, conv.ID, time.Now(), cfg))
+	sendRes, sendErr := d.deliver(ctx, in, deliverySettings, deliverText, forceActive, quoteIndex,
+		deliveryLevel, start)
 	latency := elapsed.Milliseconds()
 	if sendErr == nil && sendRes != nil && sendRes.RefIdx != "" && assistantRowID > 0 {
 		// The platform told us how to quote this message later; the row was

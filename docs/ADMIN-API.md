@@ -1,12 +1,12 @@
-# Admin API 契约（冻结版 v1.7）
+# Admin API 契约（冻结版 v1.8）
 
 > 本文件是前后端唯一契约。字段只增不改；新增字段前端必须容错。
 > 所有路径以 `/api` 为前缀。除标注 **公开** 外，全部需要认证。
 >
 > 本文件已按实际 handler（`internal/admin/*.go`）逐条核对，修订记录见 §0.1
-> （承诺可从后台取消：新增 `DELETE /api/commitments/{id}`；字段与状态机不变），
-> 更早的修订为 §0.1.1（承诺追问与人类状态）、§0.1.2（QQ 指令面板）、§0.1.3（Bot 命令与 `/help`）、
-> §0.1.4（两阶段生成）。
+> （v1.7 → v1.8：情绪状态 `affect`；新增 6 个配置键、7 组端点与 5 个计数器），
+> 更早的修订为 §0.1.1（承诺可从后台取消）、§0.1.2（承诺追问与人类状态）、
+> §0.1.3（QQ 指令面板）、§0.1.4（Bot 命令与 `/help`）、§0.1.5（两阶段生成）。
 > 三处历史漂移（SSE 事件集合、分页 `page_size` 回显、写接口的三秘密脱敏）已修复，
 > 本文件据此定稿；以后改动 handler 响应的提交必须同步本文件（契约测试在 `internal/admin/*_test.go`）。
 
@@ -40,7 +40,31 @@
   由 `settings.MaskSecret` 实现。`qq_app_secret` / `openai_api_key` / `admin_token`
   三个秘密**只进不出**（见 §3 的三秘密说明）。
 
-### 0.1 修订速览（v1.6 → v1.7）：承诺可从后台取消
+### 0.1 修订速览（v1.7 → v1.8）：情绪状态（affect）
+
+新增「按会话持久化的情绪状态」及其后台、API 与命令。**默认关闭**，关闭时回复管线、
+润色、proactive 与现有接口响应**零变化**；没有修改任何既有字段或消息状态。
+
+- **6 个配置键**（§3）：`affect_enabled`（默认 false）、`affect_pack`（默认 `daily`）、
+  `affect_inject_mode`（默认 `line`）、`affect_event_classifier`（默认 `rules`）、
+  `affect_tick_seconds`（默认 300，[60,1800]）、`affect_inject_max_tokens`
+  （默认 120，[40,300]）。按群覆盖新增 `group_overrides[].affect`（`bool | null`）与
+  `group_overrides[].affect_inject_mode`（`string | null`）。
+- **7 组端点 / 9 个方法**（§6.7）：5 个 GET（packs / conversations / state / history / events）
+  + 4 个控制 POST（pause / resume / preset / reset）。全部 protected；
+  错误沿用标准信封与 §8 错误码。
+- **5 个计数器**（§2）：`affect_ticks`、`affect_events`、`affect_injections`、
+  `affect_inject_chars`、`affect_errors`，`counters` 由 **18 项变成 23 项**。
+- **1 个管理员命令**：`/mood`（别名 `mood`），用法
+  `/mood [status|pause 分钟|resume|preset 名称|reset]`；入站 `command`、出站 `replied`，
+  不调模型、不写会话上下文。
+- **1 个后台页**：新路由 `/affect`（nav「情绪状态」），保存走既有 `PUT /api/config`。
+- **迁移**：SQLite `0013_affect`；PostgreSQL 在 `pgSchema` 增加 `affect_states` /
+  `affect_events` / `affect_history` 三表与索引。三表都是新增表，旧版本会忽略它们。
+- **没有新增消息状态**：`records.status` 的枚举不变；affect 不写 `messages`，
+  事件日志只存事件 id / tone / source / 时间，不存消息原文。
+
+### 0.1.1 修订速览（v1.6 → v1.7）：承诺可从后台取消
 
 只新增**一个写端点**，`Commitment` 的字段与状态枚举**没有任何变化**：
 
@@ -55,7 +79,7 @@
   状态中文标签为「等待追问 / 追问中 / 已完成 / 已取消」；取消按钮不再有 404/405 只读退化。
 - **没有新增记录状态、没有新增配置键、没有 schema 改动**：取消只是既有行的一次 UPDATE。
 
-### 0.1.1 上一轮修订速览（v1.5 → v1.6）：承诺追问与人类状态
+### 0.1.2 上一轮修订速览（v1.5 → v1.6）：承诺追问与人类状态
 
 新增两组后台可观测能力：**承诺（open loop）追问**与**人类状态感知**。
 
@@ -81,7 +105,7 @@
 - 承诺追问的**频率由模型判断**，代码只做 `>=60s` / `<=180d` 的技术防呆；
   **勿扰只认记忆**（不设代码静默时段），追问**原路返回**（群→群、私聊→私聊）。
 
-### 0.1.2 历史修订速览（v1.4 → v1.5）：QQ 指令面板
+### 0.1.3 历史修订速览（v1.4 → v1.5）：QQ 指令面板
 
 把命令注册表投影成平台侧的「指令面板」，让用户点开就能看到命令。契约新增
 **一个运维端点 + 一个配置键**；`records.status` 的枚举**没有任何变化**：
@@ -100,7 +124,7 @@
 - 自动同步与手动动作走**同一条** `Dispatcher.SyncCommandPanel`（`panelMu` 串行化），
   所以两者不会各自读到旧版本再各写一次。
 
-### 0.1.3 历史修订速览（v1.3 → v1.4）：Bot 命令（`/tokenstats`）与 `/help`
+### 0.1.4 历史修订速览（v1.3 → v1.4）：Bot 命令（`/tokenstats`）与 `/help`
 
 新增了「聊天内命令」这条**不经过模型**的路径。**没有新增端点、没有新增配置键**，
 契约只多了一个审计状态值：
@@ -117,7 +141,7 @@
 - 命令自身的口径：不计 `ai_requests`、不做润色、不施加人味延迟、不写 `messages` 表；
   入站 `status=command`、出站 `status=replied`，一对审计行都绑定同一条 `msg_id`。
 
-### 0.1.4 历史修订速览（v1.2 → v1.3）：两阶段生成（润色）
+### 0.1.5 历史修订速览（v1.2 → v1.3）：两阶段生成（润色）
 
 一次回复变成「主模型草稿 → 无上下文润色 → 发送润色稿」，只动了三处，没有新增端点：
 
@@ -227,7 +251,7 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
 {
   "ok": true,
   "data": {
-    "version": "0.1.0",
+    "version": "0.2.0",
     "started_at": "2026-07-21T10:00:00+08:00",
     "uptime_seconds": 3600,
     "transport": "websocket",
@@ -282,7 +306,9 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
       "polish_requests": 790, "polish_fallbacks": 12,
       "commitment_nudges": 34, "commitment_acked": 21, "commitment_postponed": 9,
       "human_status_runs": 18, "human_status_failures": 1,
-      "human_status_image_calls": 6
+      "human_status_image_calls": 6,
+      "affect_ticks": 288, "affect_events": 47, "affect_injections": 132,
+      "affect_inject_chars": 9860, "affect_errors": 1
     }
   }
 }
@@ -299,11 +325,15 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
 - `ai.base_url` 是**当前生效**的端点（数据库设置），不是 `.env` 的值：
   `base_url_set` / `api_key_set` 告诉前端「配没配」，空串 = 未配置。
 - `webhook.path` 是设置的 `qq_webhook_path`。
-- `counters` 就是进程内计数器的全部 **18** 项（没有 `tool_calls` / `proactive_sent` 计数器）。
+- `counters` 就是进程内计数器的全部 **23** 项（没有 `tool_calls` / `proactive_sent` 计数器）。
   其中 `polish_requests` / `polish_fallbacks` 属于两阶段生成：前者是**真的发出去**的 stage 2 请求数
   （润色被跳过——开关关、草稿为空、低于 `polish_min_chars`——不计），后者是其中失败回退到草稿的次数，
   因此恒有 `polish_fallbacks <= polish_requests`。两者都是 0 且回复正常 = 润色没开或被全部跳过。
   按群关掉润色的群不计入分子/分母（它们根本不发 stage 2 请求）。
+- 后 5 项属于情绪状态：`affect_ticks` 是 tick 次数；`affect_events` 是识别并记录的事件数；
+  `affect_injections` 是**非空**注入次数（档位 `off`、暂停、空状态不计）；
+  `affect_inject_chars` 是注入块总字符数（用于估算预算）；`affect_errors` 是读 / 写 / 渲染失败次数。
+  不新增按群维度，全部是进程内累计值，重启归零。
 - `store` 是**引擎无关**的一块，六项固定返回、含义随驱动变化：
 
   | 字段 | PostgreSQL | SQLite |
@@ -341,7 +371,7 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
     "readonly": {
       "driver": "postgres",
       "storage": "postgres://bot:redacted@postgres:5432/bot?sslmode=disable",
-      "version": "0.1.0"
+      "version": "0.2.0"
     },
     "qq_app_secret_set": true,
     "admin_token_set": true,
@@ -382,6 +412,7 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
 | 能力开关 | `tools_enabled`、`tools_max_steps`、`tools_total_budget_seconds`、`tools_result_max_chars`、`memory_enabled`、`memory_inject_max`、`memory_max_per_scope`、`memory_extract_enabled`、`memory_extract_every`、`web_enabled`、`web_search_provider`、`web_search_base_url`、`exec_enabled`、`exec_timeout_seconds`、`exec_max_output_bytes`、`tasks_enabled`、`tasks_max_per_member`、`tasks_max_delay_hours` |
 | 承诺追问 | `commitment_enabled`、`commitment_max_open_per_member` |
 | 人类状态 | `human_status_enabled`、`human_status_trigger_messages`、`human_status_ttl_minutes`、`human_status_timeline_messages`、`human_status_vision_enabled`、`human_status_vision_model` |
+| 情绪状态（affect） | `affect_enabled`、`affect_pack`、`affect_inject_mode`、`affect_event_classifier`、`affect_tick_seconds`、`affect_inject_max_tokens`（按群覆盖用 `group_overrides[].affect` / `affect_inject_mode`） |
 | 两阶段生成（润色） | `polish_enabled`、`polish_model`、`polish_temperature`、`polish_max_tokens`、`polish_timeout_seconds`、`polish_min_chars`（按群覆盖用 `group_overrides[].polish`） |
 | 主动消息 | `proactive_level`、`proactive_ratio`、`proactive_max_credits`、`proactive_quiet_start`、`proactive_quiet_end`、`proactive_min_interval_minutes` |
 | 接入与运维 | `qq_app_id`、`qq_app_secret`、`qq_sandbox`、`qq_transport`、`qq_intents`、`qq_shard_count`、`qq_webhook_path`、`qq_bot_openid`、`command_panel_enabled`、`admin_token`、`http_addr`、`tls_extra_ca_files`、`tls_insecure_verify`、`log_level`、`log_buffer_size` |
@@ -454,6 +485,17 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
   重试一次**（不新增 counter，重试的 token 用量见日志 `human status JSON retry`）。
   观测：`counters.human_status_runs` / `human_status_failures` /
   `human_status_image_calls`。
+- **情绪状态（affect）**：`affect_enabled` 默认 **false**；关闭时回复、润色与主动消息零变化。
+  `affect_pack` 默认 `"daily"`（当前唯一内置包；未知 id 运行期回退 `daily`）；
+  `affect_inject_mode` ∈ `off` / `line` / `full`（默认 `line`）；
+  `affect_event_classifier` ∈ `off` / `rules`（默认 `rules`）；
+  `affect_tick_seconds` 默认 300（60–1800）；`affect_inject_max_tokens` 默认 120（40–300），
+  只约束 `full` 档（`line` 固定 ≤25 tokens）。按群覆盖用 `group_overrides[].affect`
+  （`bool | null`）与 `group_overrides[].affect_inject_mode`（`string | null`）；
+  **全局 `affect_enabled` 是总开关**，群覆盖只能进一步关闭或调档，不能越过全局关；
+  `false` 是可靠关闭。状态只影响表达，不影响事实、工具与安全策略；
+  默认关是刻意的（见 D-047）。完整设计见
+  [AFFECT.md](AFFECT.md)。
 - **人味**：`humanize_level` ∈ `off` / `soft` / `medium` / `strong`（默认 `medium`，空或未知值按 `medium`）。
   `humanize_delay_scale` 默认 1（0.5–3），乘在所有停顿上；`persona` 是一句话人设，附加到系统提示词。
   按群覆盖用 `group_overrides[].humanize`。
@@ -613,7 +655,8 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
         "context_scope": "include_unaddressed", "reply_to_bots": false,
         "quote_reply": true, "tools": true, "proactive": "auto", "tasks": true,
         "memory": true, "humanize": "medium", "web": true, "exec": false,
-        "polish": false, "rate_limit_group_qpm": 30 }
+        "polish": false, "affect": true, "affect_inject_mode": "line",
+        "rate_limit_group_qpm": 30 }
     ],
     "blocked_keywords": ["政治", "违法"],
     "reply_to_bots": true,
@@ -631,11 +674,17 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
   `context_scope=include_unaddressed` 但某些群生效的上下文模式是 C1；还没读到任何群状态。
 - `group_overrides[]` 的字段全部 `omitempty`：`enabled`、`trigger_mode`、`context_mode`、
   `context_scope`、`reply_to_bots`、`quote_reply`、`tools`、`proactive`、`tasks`、`memory`、
-  `humanize`、`web`、`exec`、`polish`、`rate_limit_group_qpm`。**缺省 / `null` = 跟随全局**，
-  覆盖优先级高于全局值。
+  `humanize`、`web`、`exec`、`polish`、`affect`、`affect_inject_mode`、`rate_limit_group_qpm`。
+  **缺省 / `null` = 跟随全局**，覆盖优先级高于全局值（**affect 例外**：全局
+  `affect_enabled` 是总开关，见下）。
 - `group_overrides[].polish` 是**两阶段生成**的按群开关（`bool | null`）：`true` 强制开、`false` 强制关、
   `null` = 跟随全局 `polish_enabled`。它只覆盖**开关**；6 个 `polish_*` 参数是全局的，没有按群版本。
   保存时必须原样透传（前端 `toGroupOverridePayload` 不做白名单重建），否则改一行 QPM 会把别的群的润色设置抹掉。
+- `group_overrides[].affect` 是**情绪状态**的按群开关（`bool | null`）：`null` 跟随全局、
+  `false` 强制关闭、`true` 显式开启。**全局 `affect_enabled` 是总开关**：全局关时所有群
+  都不生效，群里的 `true` 不能越过；全局开启后群 `false` 是可靠的紧急关闭。
+  `affect_inject_mode` 覆盖该群档位（`off` / `line` / `full`；`null` = 跟随全局）。
+  这两项同样必须原样透传；其余 4 个 `affect_*` 键只有全局值，没有按群版本。
 - 空数组表示**不限制**（白名单 / 屏蔽词）。
 - `trigger_mode` ∈ `at_only`（E1）| `all_messages`（E2）；
   `context_mode` ∈ `per_member`（C1）| `shared`（C2）；
@@ -1121,6 +1170,192 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
 作用域决定可见性：`group` 只在该群、`member` 只在该成员私聊、`global` 处处可见。
 同一作用域内重复写入相同文本不会新增行，而是 `salience +0.5`。
 
+## 6.7 情绪状态（affect）
+
+后台 `/affect` 页与 `/mood` 命令使用这组端点。全部 **protected**；除特别说明外，
+错误信封与 §8 通用错误码一致。数值状态只影响表达，不进入消息内容；接口不返回用户原文。
+
+**7 组端点、9 个方法**：5 个 GET（packs / conversations / state / history / events）
++ 4 个控制 POST（pause / resume / preset / reset）。没有批量修改状态的接口；
+启用与档位仍走 `PUT /api/config`。
+
+### `GET /api/affect/packs`
+
+列出内置内容包（只读，随二进制发布）。
+
+```json
+{
+  "ok": true,
+  "data": {
+    "packs": [
+      { "id": "daily", "name": "日常心境", "version": "1.0.0",
+        "description": "群里日常聊天用的通用心境：随着对话慢慢起伏，也慢慢回落，只影响语气和长短。",
+        "dimensions": ["心情", "精力", "压力", "熟悉度", "耐心"],
+        "events": 12, "presets": 4 }
+    ]
+  }
+}
+```
+
+- 当前只有 `daily`；`dimensions` 是标签数组（不是键），`events` / `presets` 是数量。
+- 不需要服务或数据库就能返回；内置包解析失败时数组为空，不返回 5xx。
+
+### `GET /api/affect/conversations?limit=50`
+
+最近有状态的会话，按 `updated_at DESC`。
+
+| 参数 | 默认 | 范围 | 说明 |
+|---|---|---|---|
+| `limit` | 50 | 1–200 | 返回条数；越界夹取后回显实际生效值 |
+
+```json
+{
+  "ok": true,
+  "data": {
+    "conversations": [
+      { "id": "c_…", "pack": "daily", "updated_at": "2026-11-10T12:00:00+08:00",
+        "dims": { "valence": 62.5, "energy": 48, "stress": 31, "closeness": 57, "patience": 66 } }
+    ]
+  }
+}
+```
+
+- `id` 是 `conversation_id`；`dims` 是 5 维当前值，保留 2 位小数。
+- 没有状态时返回空数组，不是 404。
+
+### `GET /api/affect/state?conversation=`
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `conversation` | 是 | 会话 id；缺失或空 → `400 invalid_request` |
+
+```json
+{
+  "ok": true,
+  "data": {
+    "state": {
+      "conversation_id": "c_…",
+      "pack_id": "daily",
+      "pack_name": "日常心境",
+      "dims": { "valence": 62.5, "energy": 48, "stress": 31, "closeness": 57, "patience": 66 },
+      "events": [ { "id": "praise", "at": "2026-11-10T11:58:00+08:00" } ],
+      "ticked_at": "2026-11-10T12:00:00+08:00",
+      "updated_at": "2026-11-10T12:00:00+08:00",
+      "version": 3
+    },
+    "behavior": {
+      "max_chars_factor": 1, "max_segments": 0, "humanize_scale": 1,
+      "silence_boost": 0, "initiative_factor": 1,
+      "tone": "neutral", "reason": "no band matched"
+    },
+    "blocks": { "line": "[此刻的状态｜…] 今天比较平静。", "full": "[此刻的状态｜…] …" }
+  }
+}
+```
+
+- `state` 直接复用持久化结构：`pack_id` / `pack_name`、`dims`、最近去重标记 `events`、
+  `paused_until` / `ticked_at` / `updated_at`（空值字段省略）、乐观锁 `version`。
+- `blocks` 是 **预览**：忽略当前总开关与档位，强制计算 line / full；但**暂停中的会话仍为空串**
+  （与真实回复路径一致）。预览为空串表示该档没有可注入内容。
+- 会话存在但从未产生状态时，返回**内容包基线**（`version=0`），不是 404；
+  只有 `conversation` 不存在才 `404 not_found`。DB 读失败 → `500 internal_error`。
+
+### `GET /api/affect/history?conversation=&hours=24`
+
+| 参数 | 默认 | 范围 | 说明 |
+|---|---|---|---|
+| `conversation` | 必填 | — | 缺失 → `400 invalid_request` |
+| `hours` | 24 | 1–720 | 回看窗口；越界夹取 |
+| `limit` | 1000 | 1–1000 | 采样点上限；越界夹取 |
+
+```json
+{
+  "ok": true,
+  "data": {
+    "points": [
+      { "at": "2026-11-10T11:00:00+08:00",
+        "dims": { "valence": 60, "energy": 50, "stress": 30, "closeness": 56, "patience": 65 } }
+    ],
+    "hours": 24
+  }
+}
+```
+
+- **只返回有数据的点，不补零**；前端按 `at` 连线。`hours` 回显实际生效的窗口。
+- 历史保留 30 天；更早的点已被清理，不报错。
+
+### `GET /api/affect/events?conversation=&limit=50`
+
+| 参数 | 默认 | 范围 | 说明 |
+|---|---|---|---|
+| `conversation` | 必填 | — | 缺失 → `400 invalid_request` |
+| `limit` | 50 | 1–200 | 最近事件条数；越界夹取 |
+
+```json
+{
+  "ok": true,
+  "data": {
+    "events": [
+      { "id": 12, "conversation_id": "c_…", "event_id": "praise",
+        "tone": "positive", "source": "classifier",
+        "created_at": "2026-11-10T11:58:00+08:00" }
+    ]
+  }
+}
+```
+
+- 事件日志不含消息原文、用户昵称或 openid；`source` 记录来源（分类器写入 `classifier`）。
+- 没有事件时返回空数组；日志保留 7 天。
+
+### `POST /api/affect/pause`
+
+请求：
+
+```json
+{ "conversation": "c_…", "minutes": 60 }
+```
+
+- `minutes` 必须是正整数，范围 **1–1440**（24 小时）；缺失 / 非数字 / 越界 → `400 invalid_request`。
+- 暂停期间不注入、不施加行为影响、proactive 跳过；到期自动恢复。暂停不删除状态。
+- 响应 `200` + `{ "data": { "conversation": "c_…", "minutes": 60, "paused_until": "…" } }`。
+- `conversation` 不存在 → `404 not_found`；服务未接线 → `503 unavailable`；
+  乐观锁冲突由服务最多尝试 3 次（含首次），仍失败 → `500 internal_error`（不透传 409）。
+
+### `POST /api/affect/resume`
+
+请求 `{ "conversation": "c_…" }`。清空 `paused_until`，幂等：未暂停时也返回 `200`。
+响应 `{ "conversation": "c_…", "paused_until": "" }`；错误同 `/pause`。
+
+### `POST /api/affect/preset`
+
+请求 `{ "conversation": "c_…", "preset": "calm" }`。
+
+- `preset` 必须是当前内容包里存在的 id；未知 / 缺失 → `400 invalid_request`。
+- 应用预设会把 5 维设为预设值（仍 clamp 到 0–100、保留 2 位小数）；
+  不改变内容包、注入档位或暂停状态，也不清事件标记。
+- 响应 `{ "conversation": "c_…", "preset": "calm" }`；`conversation` 不存在 → `404 not_found`。
+
+### `POST /api/affect/reset`
+
+请求 `{ "conversation": "c_…" }`。
+
+- 把 5 维重置为内容包基线、清空暂停与最近事件标记；**保留历史点**（供曲线对照）。
+  用于把某个会话「哄回正常」，不删除会话本身。
+- 响应 `{ "conversation": "c_…", "reset": true }`；`conversation` 不存在 → `404 not_found`。
+
+### affect 错误码
+
+| HTTP | code | 场景 |
+|---|---|---|
+| 400 | `invalid_request` | 缺 `conversation` / `preset` / `minutes`，类型或范围错误；预设不存在 |
+| 401 | `unauthorized` | 未登录 |
+| 404 | `not_found` | 会话不存在 |
+| 500 | `internal_error` | 数据库读 / 写失败，或乐观锁尝试 3 次（含首次）仍冲突 |
+| 503 | `unavailable` | 情绪状态服务 / 存储未接线 |
+
+- 没有 `409`：乐观锁冲突在服务内部重读重试，不暴露给调用方。
+- `GET /api/affect/packs` 不依赖服务，其余端点在 `Affect == nil` 时返回 `503`。
+
 ### `GET /api/events/stream` — **SSE**（`text/event-stream`）
 
 连接成功后立即推一帧 `status`，之后每 5 秒推一次 `status`；总线事件按名转发；每 15 秒一帧 `ping`。
@@ -1287,7 +1522,7 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
 - 技术：Vue 3 + Vite + Vue Router + Tailwind CSS（纯 utility class，不引组件库）。
 - 页面：登录、概览（状态卡 + SSE 实时事件流 + 统计）、会话管理（列表 + 详情 + 清空/启停/合并 + 手动发送 + 引用回复）、
   策略配置（触发模式、上下文模式与范围、白名单、按群覆盖）、消息记录、日志、工具调用、长期记忆、定时任务、
-  系统设置（6 个二级子页面）。
+  情绪状态（`/affect`：5 维、历史曲线、事件、注入预览、暂停/恢复/预设/重置）、系统设置（6 个二级子页面）。
 - 构建：`pnpm install` 后 `pnpm build` 必须成功（含类型检查），产物 `web/dist/index.html` + `web/dist/assets/*`。
 - 单测：`pnpm test`（vitest），测试放 `web/src/**/__tests__/`。
 - 开发代理：`vite.config.ts` 中 `/api` 代理到 `http://127.0.0.1:8080`。

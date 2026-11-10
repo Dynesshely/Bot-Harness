@@ -303,6 +303,35 @@ CREATE TABLE IF NOT EXISTS human_status (
   UNIQUE (scope, conversation_id, member_openid)
 );
 
+CREATE TABLE IF NOT EXISTS affect_states (
+  conversation_id TEXT PRIMARY KEY,
+  pack_id         TEXT NOT NULL DEFAULT 'daily',
+  dims            TEXT NOT NULL DEFAULT '{}',
+  events          TEXT NOT NULL DEFAULT '[]',
+  paused_until    TEXT NOT NULL DEFAULT '',
+  ticked_at       TEXT NOT NULL DEFAULT '',
+  updated_at      TEXT NOT NULL,
+  version         INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS affect_events (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id TEXT NOT NULL,
+  event_id        TEXT NOT NULL,
+  tone            TEXT NOT NULL DEFAULT '',
+  source          TEXT NOT NULL DEFAULT '',
+  created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_affect_events_conversation ON affect_events(conversation_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS affect_history (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id TEXT NOT NULL,
+  at              TEXT NOT NULL,
+  dims            TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_affect_history_conversation ON affect_history(conversation_id, at DESC);
+
 CREATE TABLE IF NOT EXISTS dedup (
   msg_id     TEXT PRIMARY KEY,
   created_at TEXT NOT NULL
@@ -369,6 +398,7 @@ func (s *Store) runMigrations(ctx context.Context) error {
 		{"0010_messages_addressed", s.migrationMessagesAddressed},
 		{"0011_commitments", s.migrationCommitments},
 		{"0012_human_status", s.migrationHumanStatus},
+		{"0013_affect", s.migrationAffect},
 	}
 	for _, m := range migrations {
 		var applied int
@@ -911,6 +941,11 @@ func (s *Store) ClearConversationMessages(ctx context.Context, id string) error 
 	if _, err := s.execContext(ctx, `DELETE FROM messages WHERE conversation_id = ?`, id); err != nil {
 		return err
 	}
+	// Affect rows are per-conversation and carry user-derived state; clearing a
+	// conversation must not leave them behind.
+	if err := s.ClearAffectForConversation(ctx, id); err != nil {
+		return err
+	}
 	_, err := s.execContext(ctx, `
 UPDATE conversations SET message_count = 0, turn_count = 0, token_estimate = 0 WHERE id = ?`, id)
 	return err
@@ -919,6 +954,9 @@ UPDATE conversations SET message_count = 0, turn_count = 0, token_estimate = 0 W
 // ClearAllConversations removes every conversation and message.
 func (s *Store) ClearAllConversations(ctx context.Context) error {
 	if _, err := s.execContext(ctx, `DELETE FROM messages`); err != nil {
+		return err
+	}
+	if err := s.ClearAllAffect(ctx); err != nil {
 		return err
 	}
 	_, err := s.execContext(ctx, `DELETE FROM conversations`)
@@ -1599,6 +1637,45 @@ CREATE TABLE IF NOT EXISTS human_status (
 `)
 	if err != nil {
 		return fmt.Errorf("create human_status: %w", err)
+	}
+	return nil
+}
+
+// migrationAffect creates the three affect tables on databases that predate
+// them. The base schema already creates them for a fresh database; this
+// migration is what makes an upgrade work, and it is idempotent because
+// CREATE ... IF NOT EXISTS never touches an existing table.
+func (s *Store) migrationAffect(ctx context.Context) error {
+	_, err := s.execContext(ctx, `
+CREATE TABLE IF NOT EXISTS affect_states (
+  conversation_id TEXT PRIMARY KEY,
+  pack_id         TEXT NOT NULL DEFAULT 'daily',
+  dims            TEXT NOT NULL DEFAULT '{}',
+  events          TEXT NOT NULL DEFAULT '[]',
+  paused_until    TEXT NOT NULL DEFAULT '',
+  ticked_at       TEXT NOT NULL DEFAULT '',
+  updated_at      TEXT NOT NULL,
+  version         INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS affect_events (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id TEXT NOT NULL,
+  event_id        TEXT NOT NULL,
+  tone            TEXT NOT NULL DEFAULT '',
+  source          TEXT NOT NULL DEFAULT '',
+  created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_affect_events_conversation ON affect_events(conversation_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS affect_history (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id TEXT NOT NULL,
+  at              TEXT NOT NULL,
+  dims            TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_affect_history_conversation ON affect_history(conversation_id, at DESC);
+`)
+	if err != nil {
+		return fmt.Errorf("create affect tables: %w", err)
 	}
 	return nil
 }

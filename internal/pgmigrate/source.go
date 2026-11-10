@@ -70,8 +70,11 @@ func (s *Source) AllTables() []*Table {
 // pre-upgrade SQLite file does not have them yet; the runtime store creates them
 // on the target when it next opens, so the copy skips their absence.
 var optionalTables = map[string]bool{
-	"commitments":  true,
-	"human_status": true,
+	"commitments":    true,
+	"human_status":   true,
+	"affect_states":  true,
+	"affect_events":  true,
+	"affect_history": true,
 }
 
 // discover reads sqlite_master, applies TableOrder and loads every column.

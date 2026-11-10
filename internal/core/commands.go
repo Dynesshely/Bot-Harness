@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,6 +68,10 @@ const (
 	humanStatusUsage = "/human-status [人数]"
 	humanStatusDesc  = "分析最近24h发言者状态"
 
+	moodName  = "mood"
+	moodUsage = "/mood [status|pause 分钟|resume|preset 名称|reset]"
+	moodDesc  = "查看或调整当前会话情绪"
+
 	// recordStatusCommand marks an inbound message that was handled as a
 	// command: it neither entered the conversation nor was dropped.
 	recordStatusCommand = "command"
@@ -105,6 +111,16 @@ func (d *Dispatcher) registerBuiltinCommands() {
 		desc:      humanStatusDesc,
 		markdown:  true,
 		run:       runHumanStatus,
+	})
+	// /mood 是管理员命令：状态属于运行期信息，命令本身只读或只改当前会话的
+	// affect 状态，不调模型、不写上下文。别名 mood 让面板点击形态也能用。
+	d.registerCommand(&command{
+		name:      moodName,
+		aliases:   []string{"mood"},
+		adminOnly: true,
+		usage:     moodUsage,
+		desc:      moodDesc,
+		run:       runMood,
 	})
 	// /help 对所有人开放：它只描述已经注册的命令，不泄露任何配置或身份信息。
 	d.registerCommand(&command{
@@ -440,4 +456,149 @@ func runHelp(_ context.Context, d *Dispatcher, _ *Inbound, _ settings.Settings, 
 	lines = append(lines,
 		"点击指令面板会填入不带斜杠的命令名（如 tokenstats），等价于 /tokenstats status；带参数请用 /命令 参数。")
 	return textOutput(strings.Join(lines, "\n")), nil
+}
+
+// runMood reads or adjusts the current conversation's affect state.
+//
+// It is a pure administrative command: no model call, no context write, no
+// humanize delay. The state lives in store; the transitions (pause/resume/
+// preset/reset) go through the affect Service so the same rules apply as in the
+// admin API. When the service is not wired (feature built without it) the read
+// path still works and the write paths explain why they cannot run.
+func runMood(ctx context.Context, d *Dispatcher, in *Inbound, s settings.Settings, args []string) (commandOutput, error) {
+	action := "status"
+	if len(args) > 0 {
+		action = strings.ToLower(args[0])
+	}
+	cfg := d.settings.GroupConfig(in.GroupOpenID)
+	conv := resolveConversation(in, cfg.ContextMode)
+
+	switch action {
+	case "", "status":
+		if len(args) > 1 {
+			return textOutput("用法：" + moodUsage), nil
+		}
+		st, err := d.st.GetAffectState(ctx, conv.ID)
+		if err != nil {
+			return commandOutput{}, err
+		}
+		return textOutput(formatMoodStatus(st, time.Now())), nil
+	case "pause":
+		if len(args) != 2 {
+			return textOutput("用法：" + moodUsage), nil
+		}
+		minutes, err := strconv.Atoi(args[1])
+		if err != nil || minutes < 1 || minutes > 1440 {
+			return textOutput("暂停分钟数需要是 1–1440 的整数。\n用法：" + moodUsage), nil
+		}
+		if d.affect == nil {
+			return textOutput("情绪状态服务未启用。"), nil
+		}
+		until := time.Now().Add(time.Duration(minutes) * time.Minute)
+		if err := d.affect.Pause(ctx, conv.ID, until); err != nil {
+			return commandOutput{}, err
+		}
+		return textOutput(fmt.Sprintf("⏸ 已暂停情绪状态 %d 分钟（至 %s）。", minutes, until.Format("15:04"))), nil
+	case "resume":
+		if len(args) > 1 {
+			return textOutput("用法：" + moodUsage), nil
+		}
+		if d.affect == nil {
+			return textOutput("情绪状态服务未启用。"), nil
+		}
+		if err := d.affect.Resume(ctx, conv.ID); err != nil {
+			return commandOutput{}, err
+		}
+		return textOutput("▶️ 已恢复情绪状态。"), nil
+	case "preset":
+		if len(args) != 2 || strings.TrimSpace(args[1]) == "" {
+			return textOutput("用法：" + moodUsage), nil
+		}
+		if d.affect == nil {
+			return textOutput("情绪状态服务未启用。"), nil
+		}
+		preset := strings.TrimSpace(args[1])
+		if err := d.affect.ApplyPreset(ctx, conv.ID, preset, time.Now()); err != nil {
+			return commandOutput{}, err
+		}
+		return textOutput("✅ 已应用预设「" + preset + "」。"), nil
+	case "reset":
+		if len(args) > 1 {
+			return textOutput("用法：" + moodUsage), nil
+		}
+		if d.affect == nil {
+			return textOutput("情绪状态服务未启用。"), nil
+		}
+		if err := d.affect.Reset(ctx, conv.ID, time.Now()); err != nil {
+			return commandOutput{}, err
+		}
+		return textOutput("🔄 已重置为内容包基线。"), nil
+	default:
+		return textOutput("用法：" + moodUsage), nil
+	}
+}
+
+// moodDimOrder is the fixed five-dimension display order of the default pack.
+// Unknown dimensions are appended so a future pack still renders something.
+var moodDimOrder = []string{"valence", "energy", "stress", "closeness", "patience"}
+
+var moodDimLabels = map[string]string{
+	"valence":   "心情",
+	"energy":    "精力",
+	"stress":    "压力",
+	"closeness": "熟悉度",
+	"patience":  "耐心",
+}
+
+// formatMoodStatus renders the plain-text /mood status.
+func formatMoodStatus(st *store.AffectState, now time.Time) string {
+	if st == nil {
+		return "当前会话还没有情绪状态记录（情绪状态可能未启用，或尚未产生事件）。"
+	}
+	var b strings.Builder
+	b.WriteString("当前心境：\n")
+	seen := map[string]bool{}
+	writeDim := func(key string) {
+		label := moodDimLabels[key]
+		if label == "" {
+			label = key
+		}
+		seen[key] = true
+		fmt.Fprintf(&b, "· %s：%.1f\n", label, st.Dims[key])
+	}
+	for _, key := range moodDimOrder {
+		writeDim(key)
+	}
+	extra := make([]string, 0)
+	for key := range st.Dims {
+		if !seen[key] {
+			extra = append(extra, key)
+		}
+	}
+	sort.Strings(extra)
+	for _, key := range extra {
+		writeDim(key)
+	}
+	switch {
+	case strings.TrimSpace(st.PausedUntil) == "":
+		b.WriteString("状态：运行中")
+	case pausedUntil(st.PausedUntil, now):
+		if until, err := time.Parse(time.RFC3339, st.PausedUntil); err == nil {
+			b.WriteString("状态：已暂停至 " + until.Local().Format("01-02 15:04"))
+		} else {
+			b.WriteString("状态：已暂停至 " + st.PausedUntil)
+		}
+	default:
+		b.WriteString("状态：运行中（暂停已到期）")
+	}
+	return b.String()
+}
+
+// pausedUntil reports whether until is still in the future.
+func pausedUntil(until string, now time.Time) bool {
+	t, err := time.Parse(time.RFC3339, until)
+	if err != nil {
+		return false
+	}
+	return t.After(now)
 }

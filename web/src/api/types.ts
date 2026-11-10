@@ -232,6 +232,21 @@ export interface EditableConfig {
   human_status_vision_enabled?: boolean
   /** 图片分析使用的视觉模型名；空串 = 主模型。 */
   human_status_vision_model?: string
+  /**
+   * 情绪状态：按内容包积累 5 维数值，注入到系统提示词并影响回复行为。
+   * 默认关；关闭时现有行为零变化。
+   */
+  affect_enabled?: boolean
+  /** 内容包 id；默认 "daily"（日常心境）。 */
+  affect_pack?: string
+  /** 注入档位：off 不注入 / line 一行 / full 多段。 */
+  affect_inject_mode?: AffectInjectMode
+  /** 事件分类器：off 不分类 / rules 按内容包正则匹配。 */
+  affect_event_classifier?: AffectEventClassifier
+  /** 后台 tick 间隔（秒），范围 [60,1800]，默认 300。 */
+  affect_tick_seconds?: number
+  /** 单次注入的 token 上限，范围 [40,300]，默认 120。 */
+  affect_inject_max_tokens?: number
   /** 接入与运维（原先在 .env，现在同样存数据库）。 */
   qq_app_id?: string
   qq_app_secret?: string
@@ -371,6 +386,10 @@ export interface GroupOverride {
   web?: boolean | null
   /** 该群容器内执行开关。 */
   exec?: boolean | null
+  /** 该群情绪状态开关；null / 省略 = 跟随全局。 */
+  affect?: boolean | null
+  /** 该群情绪注入档位（off / line / full）；null / 省略 = 跟随全局。 */
+  affect_inject_mode?: AffectInjectMode | null
   /** 0 / null = 不单独限流。 */
   rate_limit_group_qpm?: number | null
 }
@@ -871,4 +890,132 @@ export interface ProactiveOverview {
   max_credits: number
   quiet_hours: number[]
   min_interval_minutes: number
+}
+
+
+/* ------------------------------------------------------------------ *
+ * 情绪状态（Affect）
+ * ------------------------------------------------------------------ */
+
+/** 注入档位。 */
+export type AffectInjectMode = 'off' | 'line' | 'full'
+/** 事件分类器。 */
+export type AffectEventClassifier = 'off' | 'rules'
+
+/** 5 维数值（key 为内容包里的维度 key，值 0–100）。 */
+export type AffectDims = Record<string, number>
+
+export interface AffectPackDimension {
+  key: string
+  label: string
+  min: number
+  max: number
+  baseline: number
+  half_life_hours?: number
+}
+
+export interface AffectPackPreset {
+  id: string
+  name: string
+  dims?: AffectDims
+}
+
+/** 内容包元信息（GET /api/affect/packs）。 */
+export interface AffectPack {
+  id: string
+  name: string
+  version?: string
+  description?: string
+  /**
+   * 内容包的维度信息。内置目录接口（affect.PackInfo）只回 key 列表，
+   * 而完整内容包会回对象数组；两种形状都要兼容。
+   */
+  dimensions?: AffectPackDimension[] | string[]
+  /** 完整内容包是对象数组；目录接口只回数量。 */
+  presets?: AffectPackPreset[] | number
+  /** 完整内容包是事件定义数组；目录接口只回数量。 */
+  events?: number | { id: string; label?: string; tone?: string }[]
+}
+
+/** 会话情绪状态摘要（GET /api/affect/conversations）。 */
+export interface AffectConversation {
+  id: string
+  pack: string
+  updated_at: string
+  dims?: AffectDims
+}
+
+/** 某会话的完整情绪状态。 */
+export interface AffectState {
+  conversation_id: string
+  pack_id: string
+  /** 后端 Snapshot 会带上内容包显示名；目录接口没有时前端回退到 id。 */
+  pack_name?: string
+  dims: AffectDims
+  /** 最近事件标记（id + 时间）。 */
+  events?: { id: string; at: string }[]
+  /** RFC3339；空 / 缺省 = 未暂停。 */
+  paused_until?: string
+  ticked_at?: string
+  updated_at?: string
+  version?: number
+  /** 后端 Snapshot 把行为摘要嵌在 state 里；接口可能另放在 data.behavior。 */
+  behavior?: AffectBehavior
+}
+
+/** 行为层参数（后端按维度值计算）。 */
+export interface AffectBehavior {
+  max_chars_factor: number
+  max_segments: number
+  humanize_scale: number
+  silence_boost: number
+  initiative_factor: number
+  tone?: string
+  reason?: string
+}
+
+/** 注入预览：line / full 两档的最终文本（off 时为空串）。 */
+export interface AffectBlocks {
+  line: string
+  full: string
+}
+
+/** GET /api/affect/state 的 data。 */
+export interface AffectStateData {
+  state: AffectState | null
+  behavior: AffectBehavior | null
+  blocks: AffectBlocks
+}
+
+/** 历史点（GET /api/affect/history）。 */
+export interface AffectHistoryPoint {
+  at: string
+  dims: AffectDims
+}
+
+/** 事件日志（GET /api/affect/events）。 */
+export interface AffectEvent {
+  id: number
+  conversation_id: string
+  event_id: string
+  tone: string
+  source: string
+  created_at: string
+}
+
+/** GET /api/affect/conversations 的 data。 */
+export interface AffectPacksData {
+  packs: AffectPack[]
+}
+
+export interface AffectConversationsData {
+  conversations: AffectConversation[]
+}
+
+export interface AffectHistoryData {
+  points: AffectHistoryPoint[]
+}
+
+export interface AffectEventsData {
+  events: AffectEvent[]
 }

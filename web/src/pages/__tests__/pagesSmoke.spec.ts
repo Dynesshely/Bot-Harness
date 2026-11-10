@@ -11,6 +11,7 @@ import TasksPage from '@/pages/TasksPage.vue'
 import MemoriesPage from '@/pages/MemoriesPage.vue'
 import ToolsPage from '@/pages/ToolsPage.vue'
 import LoginPage from '@/pages/LoginPage.vue'
+import AffectPage from '@/pages/AffectPage.vue'
 import SettingsLayout from '@/pages/settings/SettingsLayout.vue'
 
 /**
@@ -58,6 +59,17 @@ const api = vi.hoisted(() => ({
   tasks: { list: vi.fn(), cancel: vi.fn() },
   commitments: { list: vi.fn(), cancel: vi.fn() },
   proactive: { overview: vi.fn() },
+  affect: {
+    packs: vi.fn(),
+    conversations: vi.fn(),
+    state: vi.fn(),
+    history: vi.fn(),
+    events: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    preset: vi.fn(),
+    reset: vi.fn(),
+  },
 }))
 
 vi.mock('@/api', async (importOriginal) => {
@@ -81,6 +93,7 @@ vi.mock('@/api', async (importOriginal) => {
     tasksApi: api.tasks,
     commitmentsApi: api.commitments,
     proactiveApi: api.proactive,
+    affectApi: api.affect,
   }
 })
 
@@ -186,6 +199,12 @@ const configFixture = {
     human_status_timeline_messages: 120,
     human_status_vision_enabled: true,
     human_status_vision_model: '',
+    affect_enabled: true,
+    affect_pack: 'daily',
+    affect_inject_mode: 'line',
+    affect_event_classifier: 'rules',
+    affect_tick_seconds: 300,
+    affect_inject_max_tokens: 120,
     web_enabled: true,
     exec_enabled: false,
   },
@@ -242,6 +261,73 @@ const commitmentsFixture = [
     ack_note: '已经发了',
     meta: '',
     created_at: '2026-07-19T09:00:00Z',
+  },
+]
+
+const affectPacksFixture = [
+  {
+    id: 'daily',
+    name: '日常心境',
+    version: '1.0.0',
+    description: '内置的日常情绪包',
+    dimensions: [
+      { key: 'valence', label: '心情', min: 0, max: 100, baseline: 55 },
+      { key: 'energy', label: '精力', min: 0, max: 100, baseline: 50 },
+      { key: 'stress', label: '压力', min: 0, max: 100, baseline: 35 },
+      { key: 'closeness', label: '熟悉度', min: 0, max: 100, baseline: 45 },
+      { key: 'patience', label: '耐心', min: 0, max: 100, baseline: 60 },
+    ],
+    events: [{ id: 'praise', label: '被夸', tone: 'positive' }],
+    presets: [
+      { id: 'calm', name: '平静' },
+      { id: 'focused', name: '专注' },
+    ],
+  },
+]
+
+const affectConversationsFixture = [
+  {
+    id: 'conv-1',
+    pack: 'daily',
+    updated_at: '2026-07-21T09:59:00Z',
+    dims: { valence: 62.5, energy: 48, stress: 31, closeness: 55, patience: 70 },
+  },
+]
+
+const affectStateFixture = {
+  conversation_id: 'conv-1',
+  pack_id: 'daily',
+  dims: { valence: 62.5, energy: 48, stress: 31, closeness: 55, patience: 70 },
+  events: [{ id: 'praise', at: '2026-07-21T09:58:00Z' }],
+  paused_until: '',
+  ticked_at: '2026-07-21T09:55:00Z',
+  updated_at: '2026-07-21T09:59:00Z',
+  version: 3,
+}
+
+const affectBehaviorFixture = {
+  max_chars_factor: 1.1,
+  max_segments: 3,
+  humanize_scale: 0.9,
+  silence_boost: 0.05,
+  initiative_factor: 1.15,
+  tone: '轻松',
+  reason: '心情好、精力一般',
+}
+
+const affectHistoryFixture = [
+  { at: '2026-07-21T08:00:00Z', dims: { valence: 55, energy: 50, stress: 35, closeness: 45, patience: 60 } },
+  { at: '2026-07-21T09:00:00Z', dims: { valence: 62.5, energy: 48, stress: 31, closeness: 55, patience: 70 } },
+]
+
+const affectEventsFixture = [
+  {
+    id: 1,
+    conversation_id: 'conv-1',
+    event_id: 'praise',
+    tone: 'positive',
+    source: 'rules',
+    created_at: '2026-07-21T09:58:00Z',
   },
 ]
 
@@ -319,6 +405,22 @@ function resetApiMocks(): void {
   })
   api.logs.list.mockResolvedValue([])
   api.messages.list.mockResolvedValue({ total: 0, page: 1, page_size: 20, items: [] })
+  api.affect.packs.mockResolvedValue(affectPacksFixture)
+  api.affect.conversations.mockResolvedValue(affectConversationsFixture)
+  api.affect.state.mockResolvedValue({
+    state: affectStateFixture,
+    behavior: affectBehaviorFixture,
+    blocks: {
+      line: '[此刻的状态｜仅作语气参考] 心情不错，语气轻快一点。',
+      full: '[此刻的状态｜仅作语气参考] 心情不错。\n[自述] 今天还算有精神。',
+    },
+  })
+  api.affect.history.mockResolvedValue(affectHistoryFixture)
+  api.affect.events.mockResolvedValue(affectEventsFixture)
+  api.affect.pause.mockResolvedValue({})
+  api.affect.resume.mockResolvedValue({})
+  api.affect.preset.mockResolvedValue({})
+  api.affect.reset.mockResolvedValue({})
 }
 
 beforeEach(() => {
@@ -441,6 +543,7 @@ describe('一级页面挂载冒烟', () => {
     { label: '定时任务', component: TasksPage, path: '/tasks', anchor: '任务' },
     { label: '长期记忆', component: MemoriesPage, path: '/memories', anchor: '记忆' },
     { label: '工具调用', component: ToolsPage, path: '/tools', anchor: '工具' },
+    { label: '情绪状态', component: AffectPage, path: '/affect', anchor: '情绪状态' },
     { label: '登录页', component: LoginPage, path: '/login', anchor: '登录' },
   ]
 
@@ -481,6 +584,10 @@ describe('设置页 6 个二级页挂载冒烟', () => {
       path: '/settings/capability',
       label: '能力',
       anchors: [
+        '情绪状态',
+        '默认关闭',
+        '日常心境',
+        '前往情绪状态页',
         '工具调用',
         'tools_enabled',
         'tools_max_steps',

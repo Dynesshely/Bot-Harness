@@ -2,6 +2,12 @@
   "settings": [
     "admin_openids",
     "admin_token",
+    "affect_enabled",
+    "affect_event_classifier",
+    "affect_inject_max_tokens",
+    "affect_inject_mode",
+    "affect_pack",
+    "affect_tick_seconds",
     "blocked_keywords",
     "command_panel_enabled",
     "commitment_enabled",
@@ -98,6 +104,8 @@
     "web_search_provider"
   ],
   "group_override": [
+    "affect",
+    "affect_inject_mode",
     "context_mode",
     "context_scope",
     "enabled",

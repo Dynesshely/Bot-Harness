@@ -103,6 +103,11 @@ var timestampColumns = map[string]bool{
 	"commitments.ack_at":           true,
 	"human_status.updated_at":      true,
 	"human_status.expires_at":      true,
+	"affect_states.ticked_at":      true,
+	"affect_states.updated_at":     true,
+	"affect_states.paused_until":   true,
+	"affect_events.created_at":     true,
+	"affect_history.at":            true,
 }
 
 // nullableTimestampColumns are the timestamp columns whose SQLite value may be
@@ -118,6 +123,7 @@ var nullableTimestampColumns = map[string]bool{
 	"commitments.deadline_at":      true,
 	"commitments.last_nudge_at":    true,
 	"commitments.ack_at":           true,
+	"affect_states.paused_until":   true,
 }
 
 // renderDDL builds the PostgreSQL CREATE TABLE for one source table.
