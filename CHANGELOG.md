@@ -32,6 +32,9 @@
   子页模板不再给 context 字段赋值。
 - 模型调用失败时，聊天里会带上脱敏后的错误摘要（HTTP 状态 / 上游 message / 超时/鉴权/
   限流分类），不再只有笼统的「稍后再试」；5xx 只透状态码，URL、密钥、DSN 一律不出现。
+- PostgreSQL 下后台「合并同群会话」报 `column "n" does not exist`：`MergeableGroups` 的
+  `HAVING n > 1` / `ORDER BY n DESC` 引用了 SELECT 别名，SQLite 接受、PostgreSQL 不接受；
+  改用 `COUNT(*)` 并补真实 PG 测试。
 
 ## [0.3.0] - 2026-11-10
 

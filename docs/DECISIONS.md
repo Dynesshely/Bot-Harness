@@ -1969,3 +1969,14 @@
 - **不做**：不透传请求体、完整响应、堆栈、内部端点；不改 `join_gate` / human-status 等内部判定的失败文案。
 - **代价**：用户会看到「HTTP 400」这类技术词，但比笼统文案可行动；上游 message 可能仍含业务错误码，已截断且不含密钥。
 - **时间**：2026-11-11
+
+
+## D-051：PostgreSQL 不认 HAVING 的 SELECT 别名
+
+- **背景**：合并同群会话在 PG 下报 `SQLSTATE 42703: column "n" does not exist`，SQLite 一直正常。
+- **根因**：`HAVING n > 1` / `ORDER BY n DESC` 引用 `COUNT(*) AS n` 的别名。SQLite 允许，
+  PostgreSQL 的 HAVING 在 SELECT 别名之前求值；ORDER BY 才允许别名。
+- **决定**：SQL 里 HAVING / ORDER BY 一律重复聚合表达式（`COUNT(*)`），不依赖别名；
+  并在 `TestPostgresQueries` 里固定覆盖 `MergeableGroups`，避免只靠 SQLite 测试放行。
+- **教训**：所有 `HAVING` / 别名排序语句都要在真实 PG 上跑一遍；SQLite 通过不代表 PG 通过。
+- **时间**：2026-11-11
