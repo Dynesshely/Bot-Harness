@@ -30,6 +30,15 @@ describe('emptyDraft', () => {
     expect(b.model).toBe('')
   })
 
+  it('口吻轮换默认不启用：空数组 + 0.25 概率', () => {
+    const draft = emptyDraft()
+    expect(draft.reply_style_variants).toEqual([])
+    expect(draft.reply_style_variant_probability).toBe(0.25)
+    // 数组不共享引用（上一个用例已覆盖 tls，这里钉住新数组）
+    draft.reply_style_variants.push('用 1–2 个字回复')
+    expect(emptyDraft().reply_style_variants).toEqual([])
+  })
+
   it('默认值：秘密为空、可选项为 null、开关取后端默认', () => {
     const draft = emptyDraft()
     for (const key of SECRET_KEYS) expect(draft[key]).toBe('')
@@ -125,6 +134,9 @@ describe('assign', () => {
       command_panel_enabled: false,
       log_level: 'debug',
       persona: '住手',
+      reply_style_variants: ['带一点翻译腔'],
+      reply_style_variant_probability: 0.4,
+      quote_reply_mode: 'often',
       polish_enabled: false,
       polish_model: 'polisher-mini',
       polish_temperature: 0,
@@ -163,6 +175,9 @@ describe('assign', () => {
     expect(target.command_panel_enabled).toBe(false)
     expect(target.log_level).toBe('debug')
     expect(target.persona).toBe('住手')
+    expect(target.reply_style_variants).toEqual(['带一点翻译腔'])
+    expect(target.reply_style_variant_probability).toBe(0.4)
+    expect(target.quote_reply_mode).toBe('often')
     // ?? 只挡 undefined：0（自动 / 不设下限）与 false（关掉润色）都是真实值
     expect(target.polish_enabled).toBe(false)
     expect(target.polish_model).toBe('polisher-mini')
@@ -277,6 +292,29 @@ describe('buildPatch：只提交改动字段', () => {
     const base = draftOf({ temperature: 0.9, max_tokens: 512 })
     const draft = draftOf({ temperature: 0, max_tokens: 512 })
     expect(buildPatch(draft, base)).toEqual({ temperature: 0 })
+  })
+
+  it('口吻轮换：空数组不提交、有内容才提交；概率 0 也会提交（0 是真实值）', () => {
+    const base = draftOf({ reply_style_variants: ['用 1–2 个字回复'], reply_style_variant_probability: 0.25 })
+    // 清空数组 = 关掉功能，属于真实改动
+    expect(buildPatch(draftOf({ reply_style_variants: [], reply_style_variant_probability: 0.25 }), base))
+      .toEqual({ reply_style_variants: [] })
+    // 概率 0 = 每轮都不启用，也是真实值，不能被当成空值丢掉
+    expect(
+      buildPatch(
+        draftOf({ reply_style_variants: ['用 1–2 个字回复'], reply_style_variant_probability: 0 }),
+        base,
+      ),
+    ).toEqual({ reply_style_variant_probability: 0 })
+    // 顺序变了算改动（与 tls_extra_ca_files 的整行比较一致）
+    const two = draftOf({ reply_style_variants: ['a', 'b'] })
+    expect(
+      buildPatch(draftOf({ reply_style_variants: ['b', 'a'] }), two),
+    ).toEqual({ reply_style_variants: ['b', 'a'] })
+  })
+
+  it('引用频率默认 occasionally，且与后端 Defaults() 对齐', () => {
+    expect(emptyDraft().quote_reply_mode).toBe('occasionally')
   })
 
   it('polish_max_tokens = 0 会提交（0 = 自动，不是空值）', () => {

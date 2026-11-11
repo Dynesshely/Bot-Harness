@@ -72,8 +72,12 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 引用回复的生效值 / 是否有按群覆盖 / 全局默认：会话详情里的开关要用。
-	quoteReply := s.deps.Settings.GroupConfig(conv.GroupOpenID).QuoteReply
+	// quote_reply 是兼容用的布尔视图，quote_reply_mode 是新的概率分档。
+	groupCfg := s.deps.Settings.GroupConfig(conv.GroupOpenID)
+	quoteReply := groupCfg.QuoteReply
+	quoteMode := groupCfg.QuoteReplyMode
 	quoteGlobal := s.deps.Settings.Get().QuoteReply
+	quoteGlobalMode := s.deps.Settings.Get().QuoteReplyMode
 	quoteOverride := s.deps.Settings.GroupQuoteReplyOverride(conv.GroupOpenID)
 
 	// 今日主动消息条数：手动发送与机器人自己的主动兜底共用同一份平台配额，
@@ -84,24 +88,26 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeOK(w, map[string]any{
-		"platform":             platform,
-		"id":                   conv.ID,
-		"scene":                conv.Scene,
-		"group_openid":         conv.GroupOpenID,
-		"group_name":           conv.GroupName,
-		"member_openid":        conv.MemberOpenID,
-		"member_name":          conv.MemberName,
-		"enabled":              conv.Enabled,
-		"message_count":        conv.MessageCount,
-		"turn_count":           conv.TurnCount,
-		"token_estimate":       conv.TokenEstimate,
-		"created_at":           conv.CreatedAt,
-		"last_active_at":       conv.LastActiveAt,
-		"active_today":         activeToday,
-		"quote_reply":          quoteReply,
-		"quote_reply_override": quoteOverride,
-		"quote_reply_global":   quoteGlobal,
-		"messages":             msgs,
+		"platform":                platform,
+		"id":                      conv.ID,
+		"scene":                   conv.Scene,
+		"group_openid":            conv.GroupOpenID,
+		"group_name":              conv.GroupName,
+		"member_openid":           conv.MemberOpenID,
+		"member_name":             conv.MemberName,
+		"enabled":                 conv.Enabled,
+		"message_count":           conv.MessageCount,
+		"turn_count":              conv.TurnCount,
+		"token_estimate":          conv.TokenEstimate,
+		"created_at":              conv.CreatedAt,
+		"last_active_at":          conv.LastActiveAt,
+		"active_today":            activeToday,
+		"quote_reply":             quoteReply,
+		"quote_reply_mode":        quoteMode,
+		"quote_reply_override":    quoteOverride,
+		"quote_reply_global":      quoteGlobal,
+		"quote_reply_global_mode": quoteGlobalMode,
+		"messages":                msgs,
 	})
 }
 

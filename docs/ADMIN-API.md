@@ -458,7 +458,7 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
 | 分组 | 字段 |
 |---|---|
 | 提示词与模型 | `system_prompt`、`system_prompt_file`、`openai_base_url`、`openai_api_key`、`model`、`temperature`、`max_tokens`、`request_timeout_seconds`、`context_max_turns`、`context_max_tokens`、`history_ttl_hours` |
-| 回复与人味 | `reply_max_chars`、`reply_max_segments`、`reply_footer_enabled`、`early_reply_enabled`、`early_reply_delay_seconds`、`early_reply_text`、`early_reply_recall`、`reply_to_bots`、`quote_reply`、`humanize_level`、`humanize_delay_scale`、`persona`、`markdown_enabled` |
+| 回复与人味 | `reply_max_chars`、`reply_max_segments`、`reply_footer_enabled`、`early_reply_enabled`、`early_reply_delay_seconds`、`early_reply_text`、`early_reply_recall`、`reply_to_bots`、`quote_reply`、`quote_reply_mode`、`reply_style_variants`、`reply_style_variant_probability`、`humanize_level`、`humanize_delay_scale`、`persona`、`markdown_enabled` |
 | 看图与附件 | `vision_enabled`、`vision_max_images`、`media_max_bytes` |
 | 能力开关 | `tools_enabled`、`tools_max_steps`、`tools_total_budget_seconds`、`tools_result_max_chars`、`memory_enabled`、`memory_inject_max`、`memory_max_per_scope`、`memory_extract_enabled`、`memory_extract_every`、`web_enabled`、`web_search_provider`、`web_search_base_url`、`exec_enabled`、`exec_timeout_seconds`、`exec_max_output_bytes`、`tasks_enabled`、`tasks_max_per_member`、`tasks_max_delay_hours` |
 | 承诺追问 | `commitment_enabled`、`commitment_max_open_per_member` |
@@ -577,6 +577,19 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
 
   停顿按**整轮耗时**计算（目标值 − 模型已花时间）；@机器人 的消息永远回复，
   沉默只作用于群里未被 @ 的普通消息（E2 全量模式下）。
+- **口吻轮换（备用表达风格）**：`reply_style_variants` 是一组一句话风格
+  （如「用 1–2 个字回复」「带一点翻译腔」），每条 ≤200 字、最多 8 条，提交时去空白去重；
+  空数组 = 不启用。`reply_style_variant_probability` ∈ [0,1]（默认 0.25）是**每轮**应用其中
+  一条的概率。命中时该条以「本轮说话方式：…」追加到 **stage 1 的系统提示词**（人味之后），
+  同一轮的润色阶段复用同一份提示词，所以不会出现草稿一种口吻、润色稿另一种；未命中时
+  提示词与关闭该功能逐字节一致。它只影响表达，不改润色阶段的硬约束（不许加事实等）。
+- **引用回复的档位**：`quote_reply_mode` ∈ `never`（0%）/ `occasionally`（30%，默认）/
+  `often`（70%），每轮按概率决定这一条正式答复是否引用触发消息。旧键 `quote_reply`
+  （布尔）继续兼容：写 `true` = `occasionally`、`false` = `never`，两个字段在每次保存后
+  同步（`mode != never` ⇔ 布尔为 true）；老库里只有布尔时按布尔映射。按群覆盖仍是布尔
+  `group_overrides[].quote_reply`：`false` = 该群 never，`true` = 该群 occasionally
+  （粒度不到 often），`null` = 跟随全局档位；**全局 `never` 时群 `true` 也打不开**。
+  只有正式答复经过这个判定：提前回复、错误兜底、后台手动发送的显式引用都不抽签。
 - **联网**：`web_enabled` 默认 true。`web_search_provider` 取 `"searxng"` 或空（空 = 只有 `web_fetch`）；
   `web_search_base_url` 是 SearxNG 根地址（请求 `{base}/search?format=json`；默认指向内置
   sidecar `http://searxng:8080`）。`web_search` 工具接受 `limit`（1–10，默认 5）；后端 403（未启用
@@ -732,6 +745,7 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
     "blocked_keywords": ["政治", "违法"],
     "reply_to_bots": true,
     "quote_reply": true,
+    "quote_reply_mode": "occasionally",
     "warnings": []
   }
 }
@@ -749,6 +763,10 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
   `rate_limit_group_qpm`。
   **缺省 / `null` = 跟随全局**，覆盖优先级高于全局值（**affect / join_gate 例外**：
   全局总开关，见下）。
+- `group_overrides[].quote_reply` 是**引用回复**的按群开关（`bool | null`），它只有布尔粒度，
+  映射到全局的三档 `quote_reply_mode`：`false` = 本群 `never`、`true` = 本群 `occasionally`、
+  `null` = 跟随全局档位。**全局 `never` 是天花板**：此时群里的 `true` 也打不开引用
+  （群覆盖只能收窄）。详见上文「引用回复的档位」。
 - `group_overrides[].polish` 是**两阶段生成**的按群开关（`bool | null`）：`true` 强制开、`false` 强制关、
   `null` = 跟随全局 `polish_enabled`。它只覆盖**开关**；6 个 `polish_*` 参数是全局的，没有按群版本。
   保存时必须原样透传（前端 `toGroupOverridePayload` 不做白名单重建），否则改一行 QPM 会把别的群的润色设置抹掉。
@@ -940,15 +958,21 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
 
 请求 `{ "enabled": false }`（`enabled: null` 表示清掉覆盖、跟随全局）。
 
+也可以传档位：`{ "mode": "never" }` 等价于 `{"enabled": false}`，
+`{"mode": "occasionally"}` / `{"mode": "often"}` 等价于 `{"enabled": true}`（按群覆盖只有布尔粒度，
+`often` 不会把该群单独抬到 70%，仍是全局档位）；非法 `mode` → `400 invalid_request`。
+
 响应：
 
 ```json
-{ "group_openid": "…", "quote_reply": false, "override": false, "global": true }
+{ "group_openid": "…", "quote_reply": false, "quote_reply_mode": "never",
+  "override": false, "global": true, "global_mode": "occasionally" }
 ```
 
 - 只有群会话可以设置：私聊返回 `409 no_group`（跟随全局默认）。
 - 会话不存在 → `404 not_found`。
-- 这个开关存在策略文档的 `group_overrides[].quote_reply` 里，所以策略页的覆盖表格同样能看到并修改它。
+- 这个开关存在策略文档的 `group_overrides[].quote_reply` 里，所以策略页的覆盖表格同样能看到并修改它；
+  `quote_reply_mode` 是**生效值**（跟随全局 + 本群覆盖解析后），不是存储值。
 
 ### 其它会话操作
 

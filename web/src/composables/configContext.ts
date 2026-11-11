@@ -43,7 +43,25 @@ export interface EditableDraft {
   exec_max_output_bytes: number
   humanize_level: string
   humanize_delay_scale: number
+  /** 分段气泡档位 off/soft/medium/strong；off = 一条发完。 */
+  humanize_segment_split: string
+  /** 每条气泡前的模拟打字速度（秒/字，0.05–1）。 */
+  humanize_typing_seconds_per_char: number
+  /** 整轮模拟打字的等待上限（秒，0–30）。 */
+  humanize_typing_max_seconds: number
+  /** 群消息合并档位 off/fast/natural/steady。 */
+  reply_debounce_mode: string
+  /** 安静群的合并窗口（秒，0–15）。 */
+  reply_debounce_quiet_seconds: number
+  /** 活跃群的合并窗口（秒，0–15）。 */
+  reply_debounce_active_seconds: number
   persona: string
+  /** 引用频率分档 never/occasionally/often（策略页负责，但保存走 config）。 */
+  quote_reply_mode: string
+  /** 口吻轮换：备用说话方式（每轮按概率抽一条追加到系统提示词）。 */
+  reply_style_variants: string[]
+  /** 应用一条口吻变体的概率（0–1，默认 0.25）。 */
+  reply_style_variant_probability: number | null
   /** 两阶段生成：草稿 → 润色。关掉就只用主模型一次生成。 */
   polish_enabled: boolean
   /** 润色模型名；空串 = 使用主模型。 */
@@ -194,7 +212,17 @@ export function emptyDraft(): EditableDraft {
     exec_max_output_bytes: 8192,
     humanize_level: 'medium',
     humanize_delay_scale: 1,
+    humanize_segment_split: 'medium',
+    humanize_typing_seconds_per_char: 0.3,
+    humanize_typing_max_seconds: 12,
+    reply_debounce_mode: 'natural',
+    reply_debounce_quiet_seconds: 2,
+    reply_debounce_active_seconds: 5,
     persona: '',
+    quote_reply_mode: 'occasionally',
+    // 口吻轮换默认不启用（空数组）；概率与后端 Defaults() 对齐为 0.25。
+    reply_style_variants: [],
+    reply_style_variant_probability: 0.25,
     // 两阶段生成：与后端 Defaults() 对齐（默认开、主模型、0.7、0=自动、20s、0=不设下限）。
     polish_enabled: true,
     polish_model: '',
@@ -305,6 +333,10 @@ export type NumericKey =
   | 'media_max_bytes'
   | 'exec_max_output_bytes'
   | 'humanize_delay_scale'
+  | 'humanize_typing_seconds_per_char'
+  | 'humanize_typing_max_seconds'
+  | 'reply_debounce_quiet_seconds'
+  | 'reply_debounce_active_seconds'
   | 'tasks_max_per_member'
   | 'tasks_max_delay_hours'
   | 'commitment_max_open_per_member'
@@ -331,6 +363,7 @@ export type NumericKey =
   | 'polish_max_tokens'
   | 'polish_timeout_seconds'
   | 'polish_min_chars'
+  | 'reply_style_variant_probability'
 
 export const MODEL_PARAM_KEYS = [
   'temperature',
@@ -421,7 +454,16 @@ export function assign(target: EditableDraft, source: EditableConfig | EditableD
   target.exec_max_output_bytes = source.exec_max_output_bytes ?? 8192
   target.humanize_level = source.humanize_level ?? 'medium'
   target.humanize_delay_scale = source.humanize_delay_scale ?? 1
+  target.humanize_segment_split = source.humanize_segment_split ?? 'medium'
+  target.humanize_typing_seconds_per_char = source.humanize_typing_seconds_per_char ?? 0.3
+  target.humanize_typing_max_seconds = source.humanize_typing_max_seconds ?? 12
+  target.reply_debounce_mode = source.reply_debounce_mode ?? 'natural'
+  target.reply_debounce_quiet_seconds = source.reply_debounce_quiet_seconds ?? 2
+  target.reply_debounce_active_seconds = source.reply_debounce_active_seconds ?? 5
   target.persona = source.persona ?? ''
+  target.quote_reply_mode = source.quote_reply_mode ?? ('quote_reply' in source && source.quote_reply === false ? 'never' : 'occasionally')
+  target.reply_style_variants = [...(source.reply_style_variants ?? [])]
+  target.reply_style_variant_probability = source.reply_style_variant_probability ?? 0.25
   target.polish_enabled = source.polish_enabled ?? true
   target.polish_model = source.polish_model ?? ''
   // ?? 只挡 undefined / null：后端下发的 0（自动 / 不设下限）必须原样留下。
@@ -520,6 +562,10 @@ export const NUMERIC_PATCH_KEYS: readonly NumericKey[] = [
   'media_max_bytes',
   'exec_max_output_bytes',
   'humanize_delay_scale',
+  'humanize_typing_seconds_per_char',
+  'humanize_typing_max_seconds',
+  'reply_debounce_quiet_seconds',
+  'reply_debounce_active_seconds',
   'tasks_max_per_member',
   'tasks_max_delay_hours',
   'commitment_max_open_per_member',
@@ -546,6 +592,7 @@ export const NUMERIC_PATCH_KEYS: readonly NumericKey[] = [
   'polish_max_tokens',
   'polish_timeout_seconds',
   'polish_min_chars',
+  'reply_style_variant_probability',
 ]
 
 /**
@@ -649,8 +696,33 @@ export function buildPatch(draft: EditableDraft, base: EditableDraft): Partial<E
   if (draft.humanize_delay_scale !== base.humanize_delay_scale) {
     changed.humanize_delay_scale = draft.humanize_delay_scale
   }
+  if (draft.humanize_segment_split !== base.humanize_segment_split) {
+    changed.humanize_segment_split = draft.humanize_segment_split
+  }
+  if (draft.humanize_typing_seconds_per_char !== base.humanize_typing_seconds_per_char) {
+    changed.humanize_typing_seconds_per_char = draft.humanize_typing_seconds_per_char
+  }
+  if (draft.humanize_typing_max_seconds !== base.humanize_typing_max_seconds) {
+    changed.humanize_typing_max_seconds = draft.humanize_typing_max_seconds
+  }
+  if (draft.reply_debounce_mode !== base.reply_debounce_mode) {
+    changed.reply_debounce_mode = draft.reply_debounce_mode
+  }
+  if (draft.reply_debounce_quiet_seconds !== base.reply_debounce_quiet_seconds) {
+    changed.reply_debounce_quiet_seconds = draft.reply_debounce_quiet_seconds
+  }
+  if (draft.reply_debounce_active_seconds !== base.reply_debounce_active_seconds) {
+    changed.reply_debounce_active_seconds = draft.reply_debounce_active_seconds
+  }
   if (draft.persona !== base.persona) {
     changed.persona = draft.persona
+  }
+  if (draft.quote_reply_mode !== base.quote_reply_mode) {
+    changed.quote_reply_mode = draft.quote_reply_mode
+  }
+  // 口吻轮换：整行比较（顺序变了也算改动）；空数组是真实值（= 关闭）。
+  if (draft.reply_style_variants.join('\n') !== (base.reply_style_variants ?? []).join('\n')) {
+    changed.reply_style_variants = draft.reply_style_variants
   }
   // 两阶段生成：布尔 false 是真实值（关掉润色），照发；空串的 polish_model 也是真实值
   // （= 改回「使用主模型」），和秘密字段的「空 = 没动」不同。

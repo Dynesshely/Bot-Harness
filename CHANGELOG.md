@@ -14,12 +14,36 @@
   issue / PR 模板、`CODEOWNERS`、Dependabot 配置。
 - 容器发布工作流 `.github/workflows/release.yml`（推送 `ghcr.io/dynesshely/bot-harness`）。
 - 文档资产目录 `docs/assets/`（架构图、界面截图）。
+- 口吻轮换：`reply_style_variants`（最多 8 条、每条 ≤200 字的一句话风格）+
+  `reply_style_variant_probability`（0–1，默认 0.25）。每轮按概率抽一条追加到 stage 1 的
+  系统提示词；空数组 = 不启用，润色阶段的硬约束不变。
+- 引用回复改为**频率分档** `quote_reply_mode`（`never` / `occasionally`=30% / `often`=70%，
+  默认 `occasionally`）。旧布尔 `quote_reply` 继续兼容并在校验时双向同步
+  （`true`→`occasionally`、`false`→`never`）；按群覆盖仍是布尔，
+  `true`→`occasionally`、`false`→`never`、`null`→跟随全局，全局 `never` 时群覆盖打不开。
 
 ### Changed
 
 - README 面向开源用户重写：移除内部环境与运维记录，补充徽章、架构、截图、贡献/安全/许可章节。
 - `web/package.json`：公开包（`private: false`）、Apache-2.0、版本 `0.1.0`、仓库地址、
   锁定 `pnpm@11.25.0`。
+
+## [0.3.2] - 2026-11-11
+
+### Added
+
+- **人情味 2.0**，吸收 MaiBot 的可用做法并接进现有管线：
+  - 群消息合并（`reply_debounce_mode`）：未 @ 的连续消息先攒 1–7 秒，只让第一条跑模型，
+    其余消息仍写时间线并留 `debounced into ...` 审计；@ / 引用机器人 / 命令零延迟。
+  - 分段气泡（`humanize_segment_split`）：长回复按标点概率拆成 1–3 条；代码块、链接、
+    引用块不拆；引用只挂第一条。
+  - 逐段打字（`humanize_typing_seconds_per_char` / `humanize_typing_max_seconds`）：
+    每条气泡前按字数等待，整轮有上限，已耗时扣除。
+  - 口吻轮换（`reply_style_variants` / `reply_style_variant_probability`）：按概率把一条
+    备用说话方式注入本轮提示词，草稿与润色稿共享同一份。
+  - 概率引用（`quote_reply_mode`）：never / occasionally（约 30%，默认）/ often（约 70%），
+    旧 `quote_reply` 布尔双向兼容；按群覆盖仍是布尔粒度，全局 never 是天花板。
+  - 新增 `reply_debounced_batches` / `reply_debounced_messages` 计数器（共 32 项）。
 
 ## [0.3.1] - 2026-11-11
 

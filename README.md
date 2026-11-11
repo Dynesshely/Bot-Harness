@@ -225,7 +225,7 @@ go build -o bot-harness ./cmd/bot-harness
 | 子页面 | 管什么 |
 |---|---|
 | 模型与提示词 | 模型端点 / API Key / 模型 / 温度 / 上下文窗口 / 提示词 / 看图 |
-| 回复与人味 | 分段与页脚、**两阶段生成（润色）**（`polish_enabled` / `polish_model` / `polish_temperature` / `polish_max_tokens` / `polish_timeout_seconds` / `polish_min_chars`，见 §5.12）、提前回复、人味强度 |
+| 回复与人味 | 分段与页脚、**两阶段生成（润色）**（`polish_enabled` / `polish_model` / `polish_temperature` / `polish_max_tokens` / `polish_timeout_seconds` / `polish_min_chars`，见 §5.12）、提前回复、人味强度、**口吻轮换**（`reply_style_variants` + `reply_style_variant_probability`）与**引用档位**（`quote_reply_mode`，旧 `quote_reply` 仍兼容） |
 | 能力 | 工具、记忆、联网（SearxNG）、容器内执行、定时任务 |
 | 主动消息 | 自发主动、比例预算、静音时段 |
 | 接入与运维 | QQ 凭证与传输、后台口令、监听地址、TLS、日志、附件上限、**QQ 指令面板**（`command_panel_enabled` 开关 + 「立即同步」按钮，见 §5.13.7） |
@@ -314,6 +314,8 @@ go build -o bot-harness ./cmd/bot-harness
 | 模型超过 N 秒无结果时先安抚、再以主动消息补发答案 | `early_reply_enabled` / `early_reply_delay_seconds` / `early_reply_text` | 开 / 3 秒 |
 | 正式答复送达后**撤回**那条安抚语 | `early_reply_recall` | 开 |
 | 主模型出草稿后，再用一次无上下文调用按人设重写措辞 | `polish_enabled`（详见 §5.12） | 开 |
+| 正式答复是否引用触发它的那条消息（按概率） | `quote_reply_mode`（`never` / `occasionally` / `often`；旧 `quote_reply` 布尔仍兼容） | occasionally（30%） |
+| 每轮按概率临时换一种说话风格 | `reply_style_variants` + `reply_style_variant_probability` | 空（不启用）/ 0.25 |
 
 **提前回复的工作方式**：群聊不支持流式，长回答会让用户干等。开启后，模型超过 3 秒仍未产出时，
 先用**被动回复**发一句「有点复杂，让我多想会儿～稍后直接把答案发给你」；等模型给出结果，
@@ -592,6 +594,12 @@ SearxNG 兼容的 JSON 端点（同一套 `?format=json` 契约）。
 | `polish_max_tokens` | `0` | `0` 或 `[1, 8192]` | **0 = 自动**：草稿估算 token ×1.5，下限 128，上限 `max_tokens` |
 | `polish_timeout_seconds` | `20` | `[5, 120]` | 实际生效值 = `min(本值, 剩余 request_timeout)` |
 | `polish_min_chars` | `0` | `[0, 2000]` | 草稿 rune 数低于它就**跳过**润色（省一次调用），**不算失败** |
+
+> 同一页还有两组**不经过润色阶段**的表达层开关：`quote_reply_mode`（正式答复的引用概率档位，
+> `never` / `occasionally`=30% / `often`=70%，默认 `occasionally`）与
+> `reply_style_variants` + `reply_style_variant_probability`（口吻轮换，默认空数组 = 关闭 / 0.25）。
+> 后者抽中的那条只会追加到 **stage 1** 的系统提示词（「本轮说话方式：…」），
+> 润色阶段拿到的仍是同一份提示词，硬约束不变。
 
 后台位置：「设置 → 回复与人味 → 两阶段生成」。所有键都走 `PUT /api/config`，保存即生效、无需重启。
 （e2e 测试的公共夹具把 `polish_enabled` 显式写成 `false`，断言的是「草稿原样送达」那条路径；
@@ -1419,7 +1427,7 @@ QQBOT_LIVE_TEST=1 ENV_FILE=../../.env go test ./internal/e2e -run TestLivePipeli
 
 ## 11. 版本与兼容性
 
-当前版本 **0.3.1**，变更记录见 [CHANGELOG.md](CHANGELOG.md)。`0.x` 阶段不承诺 API 完全冻结，
+当前版本 **0.3.2**，变更记录见 [CHANGELOG.md](CHANGELOG.md)。`0.x` 阶段不承诺 API 完全冻结，
 但会遵循 SemVer：破坏性变更进 minor，并写清迁移步骤。
 
 | 项 | 要求 / 说明 |

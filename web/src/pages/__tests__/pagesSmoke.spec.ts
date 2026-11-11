@@ -729,6 +729,9 @@ describe('设置页 6 个二级页挂载冒烟', () => {
       anchors: [
         '档位 humanize_level',
         '人设 persona',
+        '引用频率 quote_reply_mode',
+        '口吻轮换 reply_style_variants',
+        'reply_style_variant_probability',
         '两阶段生成',
         '润色模型 polish_model',
         '润色温度 polish_temperature',

@@ -405,6 +405,7 @@ func (s *Server) writePolicies(w http.ResponseWriter, extra []string) {
 		"blocked_keywords": cur.BlockedKeywords,
 		"reply_to_bots":    cur.ReplyToBots,
 		"quote_reply":      cur.QuoteReply,
+		"quote_reply_mode": cur.QuoteReplyMode,
 		"warnings":         warnings,
 	})
 }

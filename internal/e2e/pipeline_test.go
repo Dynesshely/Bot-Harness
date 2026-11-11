@@ -2892,6 +2892,8 @@ func TestManualSendRecordsFailures(t *testing.T) {
 // @ 触发时，回复要带上被引用消息的 msg_idx（平台的 message_reference）。
 func TestQuoteReplyReferencesTheTriggeringMessage(t *testing.T) {
 	h := newHarness(t)
+	// 默认档位是 occasionally（约 30%）：pin 随机源，让断言检查引用管线而不是抽签。
+	h.dis.SetQuoteRoll(func() float64 { return 0.1 })
 	h.dis.HandlePayload(context.Background(), groupAtMessage("QQ1", "G1", "U1", "小明", "帮我看看这个"))
 
 	sent := h.waitForSent(t, 1)
@@ -2907,6 +2909,7 @@ func TestQuoteReplyReferencesTheTriggeringMessage(t *testing.T) {
 // 即时回复（「让我多想会儿」）不带引用：它是占位语，引用只会多出一个引用块。
 func TestEarlyReplyIsNotQuoted(t *testing.T) {
 	h := newHarness(t)
+	h.dis.SetQuoteRoll(func() float64 { return 0.1 })
 	h.apply(t, `{"early_reply_enabled":true,"early_reply_delay_seconds":1,"reply_footer_enabled":false}`)
 	h.mu.Lock()
 	h.aiDelay = 3 * time.Second
@@ -2928,6 +2931,7 @@ func TestEarlyReplyIsNotQuoted(t *testing.T) {
 
 func TestQuoteReplyCanBeDisabledPerGroup(t *testing.T) {
 	h := newHarness(t)
+	h.dis.SetQuoteRoll(func() float64 { return 0.1 })
 	h.apply(t, `{"group_overrides":[{"group_openid":"G1","enabled":true,"quote_reply":false}]}`)
 
 	h.dis.HandlePayload(context.Background(), groupAtMessage("QQ3", "G1", "U1", "小明", "关掉引用"))

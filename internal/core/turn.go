@@ -260,9 +260,11 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 		deliverText = appendReplyFooter(sentText, tokenCount, elapsed)
 	}
 
-	// 引用回复：只引用触发这次回答的那条消息，按群设置决定是否启用。
+	// 引用回复：只引用触发这次回答的那条消息。开关是概率分档
+	// （never / occasionally / often），按群覆盖仍走旧的布尔语义。
 	quoteIndex := ""
-	if cfg.QuoteReply {
+	// 旧布尔是可靠的关闭信号：cfg.QuoteReply=false 时连随机源都不该掷。
+	if d.shouldQuote(cfg.QuoteReplyMode, cfg.QuoteReply) {
 		quoteIndex = in.QuoteIndex
 	}
 	// 行为参数只改**本轮副本**：上限、分段、人味节奏都跟着当下的状态走，

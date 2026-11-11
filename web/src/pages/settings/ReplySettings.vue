@@ -5,6 +5,26 @@ import SelectMenu from '@/components/SelectMenu.vue'
 import TextField from '@/components/TextField.vue'
 import ToggleField from '@/components/ToggleField.vue'
 
+const QUOTE_REPLY_MODES = [
+  { value: 'never', label: 'never · 不引用' },
+  { value: 'occasionally', label: 'occasionally · 约 30%（默认）' },
+  { value: 'often', label: 'often · 约 70%' },
+]
+
+const SEGMENT_SPLITS = [
+  { value: 'off', label: 'off · 一条发完' },
+  { value: 'soft', label: 'soft · 偶尔分条' },
+  { value: 'medium', label: 'medium · 自然分条（默认）' },
+  { value: 'strong', label: 'strong · 更爱分条' },
+]
+
+const DEBOUNCE_MODES = [
+  { value: 'off', label: 'off · 不合并' },
+  { value: 'fast', label: 'fast · 快' },
+  { value: 'natural', label: 'natural · 自然（默认）' },
+  { value: 'steady', label: 'steady · 沉稳' },
+]
+
 const HUMANIZE_LEVELS = [
   { value: 'off', label: 'off · 立即回复' },
   { value: 'soft', label: 'soft · 轻微停顿' },
@@ -38,6 +58,56 @@ const { draft } = useConfig()
               :max="3"
               hint="0.5–3；乘在所有停顿上，觉得太慢就调小"
             />
+            <SelectMenu
+              id="cfg-quote-mode"
+              v-model="draft.quote_reply_mode"
+              label="引用频率 quote_reply_mode"
+              :options="QUOTE_REPLY_MODES"
+              hint="不再每条都引用：偶尔引用更像真人；按群覆盖仍可单独关掉"
+            />
+            <SelectMenu
+              id="cfg-segment-split"
+              v-model="draft.humanize_segment_split"
+              label="分段气泡 humanize_segment_split"
+              :options="SEGMENT_SPLITS"
+              hint="像人一样把一段话拆成几条发；代码块、链接、引用块不会拆"
+            />
+            <NumberField
+              v-model="draft.humanize_typing_seconds_per_char"
+              label="打字速度 humanize_typing_seconds_per_char"
+              :step="0.05"
+              :min="0.05"
+              :max="1"
+              hint="每条气泡前的模拟输入时间（秒/字）；中文按 1×、英文按 0.5×"
+            />
+            <NumberField
+              v-model="draft.humanize_typing_max_seconds"
+              label="打字等待上限 humanize_typing_max_seconds"
+              :min="0"
+              :max="30"
+              hint="整轮模拟打字的等待上限（秒）；0 = 不额外等待"
+            />
+            <SelectMenu
+              id="cfg-debounce-mode"
+              v-model="draft.reply_debounce_mode"
+              label="群消息合并 reply_debounce_mode"
+              :options="DEBOUNCE_MODES"
+              hint="未 @ 的连续消息先攒一会儿，合并成一次理解；@ 与引用机器人立即处理"
+            />
+            <NumberField
+              v-model="draft.reply_debounce_quiet_seconds"
+              label="安静群窗口 reply_debounce_quiet_seconds"
+              :min="0"
+              :max="15"
+              hint="群最近 60 秒少于 3 条人类消息时等待的秒数"
+            />
+            <NumberField
+              v-model="draft.reply_debounce_active_seconds"
+              label="活跃群窗口 reply_debounce_active_seconds"
+              :min="0"
+              :max="15"
+              hint="群最近 60 秒至少 3 条人类消息时等待的秒数"
+            />
             <div class="sm:col-span-2 xl:col-span-1">
               <label class="label" for="cfg-persona">人设 persona</label>
               <input
@@ -49,6 +119,33 @@ const { draft } = useConfig()
               <p class="field-hint">一句话描述角色，会附加到系统提示词。</p>
             </div>
           </div>
+          <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div class="sm:col-span-2 xl:col-span-2">
+              <label class="label" for="cfg-style-variants">口吻轮换 reply_style_variants</label>
+              <textarea
+                id="cfg-style-variants"
+                :value="draft.reply_style_variants.join('\n')"
+                class="input h-20 resize-y"
+                spellcheck="false"
+                placeholder="用 1–2 个字回复&#10;带一点翻译腔"
+                @input="draft.reply_style_variants = ($event.target as HTMLTextAreaElement).value.split('\n').map((s) => s.trim()).filter(Boolean)"
+              ></textarea>
+              <p class="field-hint">
+                每行一条备用说话方式，最多 8 条、每条 200 字。留空 = 不启用。
+              </p>
+            </div>
+            <NumberField
+              v-model="draft.reply_style_variant_probability"
+              label="每轮触发概率 reply_style_variant_probability"
+              :step="0.05"
+              :min="0"
+              :max="1"
+              hint="0–1，默认 0.25；每轮按该概率抽一条追加到系统提示词（人设之后、记忆之前）"
+            />
+          </div>
+          <p class="field-hint mt-2">
+            口吻变体只改这一轮的措辞，不会进入润色阶段的硬约束；同一条回复的草稿与润色稿看到的是同一条变体。
+          </p>
           <p class="field-hint mt-2">
             停顿按「整轮耗时」计算：模型已经想了好几秒的话术，不会再多等，避免变成拖沓。
             @ 机器人的消息永远会回，沉默只作用于群里的普通消息。

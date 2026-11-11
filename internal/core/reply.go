@@ -59,14 +59,44 @@ func (d *Dispatcher) deliver(ctx context.Context, in *Inbound, s settings.Settin
 	}
 
 	opts := qq.SendOptions{
-		MsgID:        in.MsgID,
-		Markdown:     s.MarkdownEnabled,
-		SegmentPause: segmentPause(level, s.HumanizeDelayScale),
-		MaxChars:     s.ReplyMaxChars,
-		MaxSegments:  s.ReplyMaxSegments,
+		MsgID:       in.MsgID,
+		Markdown:    s.MarkdownEnabled,
+		MaxChars:    s.ReplyMaxChars,
+		MaxSegments: s.ReplyMaxSegments,
 		// Empty for the "let me think" notice and the error fallbacks: those are
 		// meta messages, quoting the question under them only adds noise.
 		QuoteMessageID: quoteIndex,
+	}
+	// 分段气泡 + 逐段打字：只有 humanize 开启时才拆，off 保持单条 + 零等待。
+	if level != HumanizeOff && level != "" {
+		bubbles := splitBubbles(text, s.HumanizeSegmentSplit, s.ReplyMaxChars, s.ReplyMaxSegments, nil)
+		if len(bubbles) > 1 {
+			opts.Bubbles = bubbles
+			remaining := bubblePauseBudget(s) - time.Since(since)
+			if remaining < 0 {
+				remaining = 0
+			}
+			spent := time.Duration(0)
+			opts.BubblePause = func(_ int, seg string) time.Duration {
+				pause := typingPause(seg, s.HumanizeTypingSecondsPerChar, s.HumanizeDelayScale)
+				if pause <= 0 || remaining <= 0 {
+					return 0
+				}
+				if pause > remaining-spent {
+					pause = remaining - spent
+				}
+				if pause < 0 {
+					pause = 0
+				}
+				spent += pause
+				return pause
+			}
+		} else {
+			// 单气泡也按字数等一次，但总量受同一份预算约束。
+			opts.SegmentPause = 0
+		}
+	} else {
+		opts.SegmentPause = 0
 	}
 	if forceActive {
 		opts.MsgID = ""
