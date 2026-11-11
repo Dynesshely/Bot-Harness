@@ -503,7 +503,7 @@ func Defaults() Settings {
 		HumanizeDelayScale:           orFloat(0, 1, 0.5, 3),
 		HumanizeSegmentSplit:         "medium",
 		HumanizeTypingSecondsPerChar: orFloat(0, 0.3, 0.05, 1),
-		HumanizeTypingMaxSeconds:     orInt(0, 12, 0, 30),
+		HumanizeTypingMaxSeconds:     12,
 		PolishEnabled:                true,
 		PolishModel:                  "",
 		PolishTemperature:            0.7,
