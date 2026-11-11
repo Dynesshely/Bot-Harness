@@ -6,7 +6,7 @@ import ModalDialog from '@/components/ModalDialog.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import TextField from '@/components/TextField.vue'
 
-const { config, readonlyEntries, actionLoading, resetConfigOpen, aiOpen, aiPrompt, aiRunning, aiResult, aiError, sendGroup, sendContent, sending, sendResult, sendError, loggingOut, runAction, openTestAi, runTestAi, runTestSend, onLogout } = useConfig()
+const { config, readonlyEntries, actionLoading, resetConfigOpen, aiOpen, closeTestAi, openResetConfig, cancelResetConfig, aiPrompt, aiRunning, aiResult, aiError, sendGroup, sendContent, sending, sendResult, sendError, loggingOut, runAction, openTestAi, runTestAi, runTestSend, onLogout } = useConfig()
 </script>
 
 <template>
@@ -70,7 +70,7 @@ const { config, readonlyEntries, actionLoading, resetConfigOpen, aiOpen, aiPromp
               type="button"
               class="btn btn-danger"
               :disabled="actionLoading !== ''"
-              @click="resetConfigOpen = true"
+              @click="openResetConfig()"
             >
               <AppIcon name="refresh" :size="15" />
               重置配置覆盖
@@ -158,7 +158,7 @@ const { config, readonlyEntries, actionLoading, resetConfigOpen, aiOpen, aiPromp
       title="测试 AI 调用"
       subtitle="POST /api/actions/test-ai"
       width="max-w-2xl"
-      @close="aiOpen = false"
+      @close="closeTestAi()"
     >
       <div class="space-y-3">
         <div>
@@ -206,7 +206,7 @@ const { config, readonlyEntries, actionLoading, resetConfigOpen, aiOpen, aiPromp
       </div>
 
       <template #footer>
-        <button type="button" class="btn" :disabled="aiRunning" @click="aiOpen = false">关闭</button>
+        <button type="button" class="btn" :disabled="aiRunning" @click="closeTestAi()">关闭</button>
         <button
           type="button"
           class="btn btn-primary"
@@ -224,7 +224,7 @@ const { config, readonlyEntries, actionLoading, resetConfigOpen, aiOpen, aiPromp
       confirm-text="重置配置"
       :loading="actionLoading === 'reset'"
       message="将清空数据库中保存的所有配置覆盖项，运行中的配置会回到内置默认值。模型端点与 API Key 没有内置默认值，重置后会变为未配置，需要重新填写。"
-      @cancel="resetConfigOpen = false"
+      @cancel="cancelResetConfig()"
       @confirm="runAction('reset')"
     />
   </div>

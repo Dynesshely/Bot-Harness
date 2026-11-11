@@ -878,6 +878,68 @@ describe('设置页 6 个二级页挂载冒烟', () => {
     wrapper.unmount()
   })
 
+  it('弹窗/开关按钮：模板不再给 context 布尔赋值，点击不触发 errorHandler', async () => {
+    // ModalDialog 用 Teleport；单测里把 teleport 内联，断言才能看到弹窗内容。
+    await appRouter.push('/settings/provider')
+    const wrapper = mount(SettingsLayout, {
+      attachTo: document.body,
+      global: {
+        plugins: [appRouter],
+        stubs: { AppIcon: true, CopyButton: true, StatusBadge: true },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+    // ModalDialog 的真实 Teleport 内容在 body 里，不在 wrapper.text() 中。
+    const text = () => document.body.textContent ?? ''
+    const clickButton = async (label: string) => {
+      // 弹窗内容 Teleport 到 body：优先在 wrapper 里找，再退到 document。
+      let button = wrapper.findAll('button').find((item) => item.text().includes(label))
+      if (!button) {
+        const buttons = Array.from(document.querySelectorAll('button'))
+        const node = buttons.find((item) => (item.textContent ?? '').includes(label))
+        if (node) {
+          node.click()
+          await flushPromises()
+          return
+        }
+      }
+      expect(button, '找不到按钮：' + label).toBeTruthy()
+      await button?.trigger('click')
+      await flushPromises()
+    }
+
+    // 大屏编辑：promptOpen 必须真的打开弹窗（而不是抛 .value 异常被吞进 toast）
+    await clickButton('大屏编辑')
+    expect(text()).toContain('编辑系统提示词')
+    await clickButton('完成')
+    expect(text()).not.toContain('编辑系统提示词')
+
+    // 手动输入 / 模型参数：两个 toggle 必须切换状态
+    const customBefore = wrapper.text().includes('手动输入')
+    await clickButton(customBefore ? '手动输入' : '从列表选择')
+    expect(wrapper.text()).toContain(customBefore ? '从列表选择' : '手动输入')
+    await clickButton('模型参数')
+    expect(wrapper.text()).toContain('温度 temperature')
+
+    // 测试 AI 弹窗：打开 / 关闭
+    await appRouter.push('/settings/system')
+    await flushPromises()
+    await clickButton('测试 AI')
+    expect(text()).toContain('测试 AI 调用')
+    await clickButton('关闭')
+    expect(text()).not.toContain('测试 AI 调用')
+
+    // 重置配置：打开后取消
+    await clickButton('重置配置覆盖')
+    expect(text()).toContain('将清空数据库中保存的所有配置覆盖项')
+    await clickButton('取消')
+
+    expect(unexpected(consoleErrors)).toEqual([])
+    expect(unexpected(consoleWarns)).toEqual([])
+    wrapper.unmount()
+  })
+
   it('配置加载完成后控件显示的是后端值（不是占位/空值）', async () => {
     const wrapper = await mountRoute(SettingsLayout, '/settings/provider')
     const baseUrl = wrapper.find<HTMLInputElement>('#cfg-base-url')

@@ -1,5 +1,5 @@
 // 设置页共享上下文：多级子页面共用同一份 draft / patch / 保存逻辑。
-import type { InjectionKey } from 'vue'
+import type { InjectionKey, Ref } from 'vue'
 import { inject, provide } from 'vue'
 import type { ConfigData, EditableConfig, TestAiResult } from '@/api/types'
 
@@ -758,43 +758,68 @@ export function validateDraft(draft: EditableDraft): string {
 }
 
 
-/** 分区页面从布局拿到的全部状态与动作。值由布局里的 reactive 容器提供（ref 会被自动解包）。 */
+/**
+ * 分区页面从布局拿到的全部状态与动作。
+ *
+ * **状态字段里除了 `draft` / `loaded` 两个 reactive 草稿，其余都是 ref**：
+ * 模板里直接读（`{{ error }}`、`:open="promptOpen"`）会自动解包，脚本里要写 `.value`。
+ *
+ * 为什么不是「reactive 容器里放 ref、子页解构出值」：解构拿到的是**那一刻的快照**，
+ * 之后布局里改 ref 子页不会重渲染（弹窗永远打不开、模型列表永远空着）。
+ * 所以这里 provide 的是 ref 本身。
+ *
+ * **子页不要直接给这些字段赋值**（尤其不能写 `promptOpen = true`）：
+ * 走下面的动作方法，语义更清楚，也把「打开 / 关闭」收敛在一处。
+ * 历史教训：ref 被塞进 reactive 容器后解构成普通 boolean，
+ * 模板里的 `promptOpen = true` 被编译成 `promptOpen.value = true`，
+ * 运行期直接抛 `Cannot create property 'value' on boolean 'false'`。
+ */
 export interface ConfigContext {
   draft: EditableDraft
-  loaded: EditableDraft
-  config: ConfigData | null
-  error: string
-  loading: boolean
-  saving: boolean
-  dirty: boolean
+  loaded: Ref<EditableDraft>
+  config: Ref<ConfigData | null>
+  error: Ref<string>
+  loading: Ref<boolean>
+  saving: Ref<boolean>
+  dirty: Ref<boolean>
   /** 非空表示本地校验没过：保存按钮应禁用，文案即原因。 */
-  validationError: string
-  restartRequired: string[]
-  apiKeySource: string
-  readonlyEntries: { key: string; label: string; value: string }[]
-  modelIds: string[]
-  modelsBaseUrl: string
-  modelsFetchedAt: string
-  modelsLoading: boolean
-  modelsError: string
-  customModel: boolean
-  modelMissingFromList: boolean
-  promptOpen: boolean
-  modelParamsOpen: boolean
-  modelParamsDirtyCount: number
-  actionLoading: '' | 'reconnect' | 'token' | 'reset'
-  resetConfigOpen: boolean
-  aiOpen: boolean
-  aiPrompt: string
-  aiRunning: boolean
-  aiResult: TestAiResult | null
-  aiError: string
-  sendGroup: string
-  sendContent: string
-  sending: boolean
-  sendResult: string
-  sendError: string
-  loggingOut: boolean
+  validationError: Ref<string>
+  restartRequired: Ref<string[]>
+  apiKeySource: Ref<string>
+  readonlyEntries: Ref<{ key: string; label: string; value: string }[]>
+  modelIds: Ref<string[]>
+  modelsBaseUrl: Ref<string>
+  modelsFetchedAt: Ref<string>
+  modelsLoading: Ref<boolean>
+  modelsError: Ref<string>
+  customModel: Ref<boolean>
+  modelMissingFromList: Ref<boolean>
+  promptOpen: Ref<boolean>
+  modelParamsOpen: Ref<boolean>
+  modelParamsDirtyCount: Ref<number>
+  actionLoading: Ref<'' | 'reconnect' | 'token' | 'reset'>
+  resetConfigOpen: Ref<boolean>
+  aiOpen: Ref<boolean>
+  aiPrompt: Ref<string>
+  aiRunning: Ref<boolean>
+  aiResult: Ref<TestAiResult | null>
+  aiError: Ref<string>
+  sendGroup: Ref<string>
+  sendContent: Ref<string>
+  sending: Ref<boolean>
+  sendResult: Ref<string>
+  sendError: Ref<string>
+  loggingOut: Ref<boolean>
+  /** 打开系统提示词大屏编辑弹窗。子页不要直接给 promptOpen 赋值。 */
+  openPrompt: () => void
+  closePrompt: () => void
+  /** 切换「手动输入模型」与「从列表选择」。 */
+  toggleCustomModel: () => void
+  /** 展开 / 折叠模型参数面板。 */
+  toggleModelParams: () => void
+  closeTestAi: () => void
+  openResetConfig: () => void
+  cancelResetConfig: () => void
   save: () => Promise<void>
   discard: () => void
   reload: () => Promise<void>
