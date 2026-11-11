@@ -97,9 +97,7 @@ func (s *Sender) Send(ctx context.Context, opts SendOptions, text string) (*Send
 	var segments []string
 	if len(opts.Bubbles) > 0 {
 		for _, bubble := range opts.Bubbles {
-			for _, part := range SplitText(bubble, maxChars) {
-				segments = append(segments, part)
-			}
+			segments = append(segments, SplitText(bubble, maxChars)...)
 		}
 	} else {
 		segments = SplitText(text, maxChars)
