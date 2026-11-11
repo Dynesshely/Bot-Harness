@@ -71,7 +71,11 @@ type harness struct {
 	uploadFail bool
 	aiReply    string
 	aiFail     bool
-	aiDelay    time.Duration
+	// aiFailStatus / aiFailMessage let a test drive the user-facing error path:
+	// the fake upstream answers this HTTP status with this provider message.
+	aiFailStatus  int
+	aiFailMessage string
+	aiDelay       time.Duration
 	// aiReasoningOnly makes the fake provider imitate a reasoning model that
 	// burns its whole budget thinking and never writes a final answer.
 	aiReasoningOnly bool
@@ -228,6 +232,8 @@ func newHarness(t *testing.T) *harness {
 			h.lastAIBody = body
 		}
 		fail := h.aiFail
+		failStatus := h.aiFailStatus
+		failMessage := h.aiFailMessage
 		reply := h.aiReply
 		delay := h.aiDelay
 		reasoningOnly := h.aiReasoningOnly
@@ -270,8 +276,16 @@ func newHarness(t *testing.T) *harness {
 			return
 		}
 		if fail {
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"error":{"message":"boom"}}`))
+			status := failStatus
+			if status == 0 {
+				status = http.StatusInternalServerError
+			}
+			message := failMessage
+			if message == "" {
+				message = "boom"
+			}
+			w.WriteHeader(status)
+			_, _ = fmt.Fprintf(w, `{"error":{"message":%q}}`, message)
 			return
 		}
 		h.mu.Lock()
@@ -1084,8 +1098,11 @@ func TestModelFailureSendsFallbackNotice(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("expected one fallback notice, got %d", len(sent))
 	}
-	if !strings.Contains(sent[0].Body.Content, "出错") {
-		t.Fatalf("unexpected fallback text %q", sent[0].Body.Content)
+	if !strings.Contains(sent[0].Body.Content, "模型服务异常（HTTP 500）") {
+		t.Fatalf("fallback should carry the sanitized upstream status, got %q", sent[0].Body.Content)
+	}
+	if strings.Contains(sent[0].Body.Content, "boom") {
+		t.Fatalf("provider message should be summarized without raw payload: %q", sent[0].Body.Content)
 	}
 	if n := h.dis.Metrics().AIErrors.Load(); n != 1 {
 		t.Fatalf("ai error counter = %d", n)
@@ -1106,6 +1123,33 @@ func TestModelFailureSendsFallbackNotice(t *testing.T) {
 	}
 	if !sawFailed {
 		t.Fatalf("expected a failed record, got %#v", recs)
+	}
+}
+
+func TestModelErrorPassthroughIsSanitized(t *testing.T) {
+	h := newHarness(t)
+	h.mu.Lock()
+	h.aiFail = true
+	h.aiFailStatus = http.StatusBadRequest
+	h.aiFailMessage = "invalid model: demo-model; endpoint https://api.internal.example/v1"
+	h.mu.Unlock()
+
+	h.dis.HandlePayload(context.Background(), groupAtMessage("F2", "G1", "U1", "小明", "在吗"))
+
+	sent := h.waitForSent(t, 1)
+	if len(sent) != 1 {
+		t.Fatalf("expected one error notice, got %d", len(sent))
+	}
+	body := sent[0].Body.Content
+	for _, want := range []string{"模型调用失败（HTTP 400）", "invalid model"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("notice %q missing %q", body, want)
+		}
+	}
+	for _, deny := range []string{"api.internal.example", "https://"} {
+		if strings.Contains(body, deny) {
+			t.Fatalf("notice %q leaks %q", body, deny)
+		}
 	}
 }
 

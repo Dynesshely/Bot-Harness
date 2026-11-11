@@ -142,7 +142,7 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 		if !errors.Is(aiCtx.Err(), context.DeadlineExceeded) {
 			d.log.Warn("model call failed", "component", "ai", "error", err.Error())
 		}
-		fallback := "抱歉，我这边刚才出错了，稍后再试试～"
+		fallback := "抱歉，我这边出错了（" + userFacingAIError(err) + "）。可以稍后再试，或让管理员检查后台模型配置。"
 		if errors.Is(err, ai.ErrReasoningOnlyCompletion) {
 			// The model spent its budget thinking and never wrote an answer.
 			// Its chain of thought is never sent, so ask for a retry instead of
