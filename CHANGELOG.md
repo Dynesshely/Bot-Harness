@@ -21,6 +21,18 @@
 - `web/package.json`：公开包（`private: false`）、Apache-2.0、版本 `0.1.0`、仓库地址、
   锁定 `pnpm@11.25.0`。
 
+## [0.3.1] - 2026-11-11
+
+### Fixed
+
+- 设置页：修复点击「大屏编辑 / 手动输入 / 模型参数 / 测试 AI / 重置配置覆盖」时
+  抛出 `Cannot create property 'value' on boolean 'false'` 的问题。根因是设置布局把
+  ref 装进 `reactive` 再 provide，子页解构后拿到的是普通 boolean；模板里的直接赋值被
+  编译成 `.value =`。现在布局直接 provide ref，并由布局提供打开/关闭/切换方法，
+  子页模板不再给 context 字段赋值。
+- 模型调用失败时，聊天里会带上脱敏后的错误摘要（HTTP 状态 / 上游 message / 超时/鉴权/
+  限流分类），不再只有笼统的「稍后再试」；5xx 只透状态码，URL、密钥、DSN 一律不出现。
+
 ## [0.3.0] - 2026-11-10
 
 > 版本号 **0.3.0 待 Lead 确认**；确认后再统一更新 `internal/config.Version`、Dockerfile 与

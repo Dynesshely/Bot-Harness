@@ -1419,7 +1419,7 @@ QQBOT_LIVE_TEST=1 ENV_FILE=../../.env go test ./internal/e2e -run TestLivePipeli
 
 ## 11. 版本与兼容性
 
-当前版本 **0.3.0**（版本号待 Lead 确认；确认前构建产物可能仍标 0.2.0），变更记录见 [CHANGELOG.md](CHANGELOG.md)。`0.x` 阶段不承诺 API 完全冻结，
+当前版本 **0.3.1**，变更记录见 [CHANGELOG.md](CHANGELOG.md)。`0.x` 阶段不承诺 API 完全冻结，
 但会遵循 SemVer：破坏性变更进 minor，并写清迁移步骤。
 
 | 项 | 要求 / 说明 |

@@ -223,6 +223,14 @@ bash scripts/restore-pg.sh ~/bot-harness-backups/bot-<UTC 时间戳>            
     描述可能看错，不能当事实来源；默认提示词不推断年龄 / 性别 / 健康等敏感属性。
     改这条路径要补当前 / 引用 / 合并来源、历史标注、视觉关闭、失败降级与多模态回退测试。
 
+23. **模型错误对用户可见，但只透出脱敏摘要**（`internal/core/ai_error.go`）：
+    普通对话的模型失败兜底必须带摘要（HTTP 状态 / 上游 `error.message` / 超时 / 鉴权 /
+    限流分类），不能只说「出错了，稍后再试」。摘要统一走 `userFacingAIError`：URL 主机与路径、
+    `sk-…`、Bearer、`api_key`/`token`/`password`、`postgres://` DSN 一律替换；5xx 只透状态码；
+    截断 220 rune。完整 err 只进日志与 `LastAIError`，同时 `finishRecord` 仍记 `failed`。
+    reasoning-only 保持原有人话术（不把思维链倒给用户）；join_gate / human-status 等内部判定的
+    失败文案不在透传范围。改这条路径要补 4xx/5xx/超时/鉴权/限流/密钥与 URL 泄漏测试。
+
 ## 3. 修改配置项
 
 `internal/settings` 是运行期配置的唯一入口。新增一个键的完整顺序：
