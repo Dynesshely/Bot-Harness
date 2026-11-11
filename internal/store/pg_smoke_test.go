@@ -202,6 +202,43 @@ func TestPostgresQueries(t *testing.T) {
 		t.Fatalf("pages overlap: page1 oldest=%d page2 newest=%d", first[0].ID, older[len(older)-1].ID)
 	}
 
+	// --- GROUP BY + HAVING on a SELECT alias (MergeableGroups) --------------
+	// PostgreSQL resolves HAVING before the SELECT alias exists, so the query
+	// must repeat COUNT(*) instead of `HAVING n > 1`. SQLite accepts the alias,
+	// which is why only a real PG run catches this.
+	mergeGroup := groupID + ":MERGE"
+	mergeA := mergeGroup + ":A"
+	mergeB := mergeGroup + ":B"
+	mergeCleanup := func() {
+		_, _ = s.execContext(ctx, `DELETE FROM conversations WHERE group_openid = ?`, mergeGroup)
+	}
+	mergeCleanup()
+	defer mergeCleanup()
+	for _, id := range []string{mergeA, mergeB} {
+		if err := s.EnsureConversation(ctx, &Conversation{
+			ID: id, Scene: SceneGroupMember, GroupOpenID: mergeGroup, MemberOpenID: "U1",
+		}); err != nil {
+			t.Fatalf("ensure merge conversation %s: %v", id, err)
+		}
+	}
+	merges, err := s.MergeableGroups(ctx, 100)
+	if err != nil {
+		t.Fatalf("mergeable groups: %v", err)
+	}
+	var mergeEntry *GroupConversationSummary
+	for i := range merges {
+		if merges[i].GroupOpenID == mergeGroup {
+			mergeEntry = &merges[i]
+			break
+		}
+	}
+	if mergeEntry == nil {
+		t.Fatalf("group %q missing from MergeableGroups: %+v", mergeGroup, merges)
+	}
+	if len(mergeEntry.Conversations) != 2 {
+		t.Fatalf("mergeable conversations = %d, want 2", len(mergeEntry.Conversations))
+	}
+
 	// --- GROUP BY aggregate with a correlated subquery (TopGroups) ----------
 	// TopGroups counts inbound records joined against conversations.group_name;
 	// it is the query most likely to break when a placeholder is mis-numbered.
