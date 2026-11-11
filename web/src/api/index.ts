@@ -31,6 +31,9 @@ import type {
   QuoteReplyState,
   StatsData,
   MemoryItem,
+  ExpressionInput,
+  ExpressionItem,
+  ExpressionQuery,
   ProactiveOverview,
   TaskItem,
   ToolCallItem,
@@ -336,6 +339,47 @@ export const memoriesApi = {
   },
   forgetGroup(groupOpenID: string): Promise<{ deleted: number }> {
     return request<{ deleted: number }>('/memories', { method: 'DELETE', query: { group_openid: groupOpenID } })
+  },
+}
+
+/* ------------------------------------------------------------------ *
+ * 表达方式库（expressions）
+ * ------------------------------------------------------------------ */
+
+export const expressionsApi = {
+  /** 分页列表；group_openid 为空 = 全部群，enabled 为空 = 不筛启停。 */
+  list(query: ExpressionQuery = {}, signal?: AbortSignal): Promise<Paged<ExpressionItem>> {
+    return request<Paged<ExpressionItem>>('/expressions', {
+      query: {
+        group_openid: query.group_openid || undefined,
+        enabled: query.enabled === '' ? undefined : query.enabled,
+        q: query.q || undefined,
+        page: query.page,
+        page_size: query.page_size,
+      },
+      signal,
+    }).then((data) => ({ ...data, items: data.items ?? [] }))
+  },
+  /** 人工新增一条；同一群 + 同一情境 + 同一说法已存在时返回已有行。 */
+  add(body: ExpressionInput): Promise<ExpressionItem> {
+    return request<ExpressionItem>('/expressions', { method: 'POST', body })
+  },
+  /** 启停一条（审核：学习结果默认待审，这里决定是否让它进入提示词）。 */
+  setEnabled(id: number, enabled: boolean): Promise<{ id: number; enabled: boolean }> {
+    return request<{ id: number; enabled: boolean }>(`/expressions/${id}/enabled`, {
+      method: 'POST',
+      body: { enabled },
+    })
+  },
+  /** 删除一条。 */
+  remove(id: number): Promise<{ deleted: number; id: number }> {
+    return request<{ deleted: number; id: number }>(`/expressions/${id}`, { method: 'DELETE' })
+  },
+  /** 强化一条（提高它在召回排序里的权重）。 */
+  reinforce(id: number): Promise<{ id: number; reinforced: boolean }> {
+    return request<{ id: number; reinforced: boolean }>(`/expressions/${id}/reinforce`, {
+      method: 'POST',
+    })
   },
 }
 

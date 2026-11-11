@@ -317,6 +317,7 @@ go build -o bot-harness ./cmd/bot-harness
 | 正式答复是否引用触发它的那条消息（按概率） | `quote_reply_mode`（`never` / `occasionally` / `often`；旧 `quote_reply` 布尔仍兼容） | occasionally（30%） |
 | 每轮按概率临时换一种说话风格 | `reply_style_variants` + `reply_style_variant_probability` | 空（不启用）/ 0.25 |
 | 同一群的未 @ 连续消息先攒一个窗口，只让第一条跑模型 | `reply_debounce_mode`（`off` / `fast` / `natural` / `steady`）+ `reply_debounce_quiet_seconds` / `reply_debounce_active_seconds`（0–15） | natural / 2 秒 / 5 秒 |
+| 从真实群聊学习「什么情境怎么说」，按向量召回后注入回复 | `expression_enabled` + `expression_mode`（`fast` / `precise`）+ 向量模型/召回/注入/学习/审核/全局共享（见 §5.18） | 关 / fast |
 
 **提前回复的工作方式**：群聊不支持流式，长回答会让用户干等。开启后，模型超过 3 秒仍未产出时，
 先用**被动回复**发一句「有点复杂，让我多想会儿～稍后直接把答案发给你」；等模型给出结果，
@@ -1218,6 +1219,51 @@ Rows [][]string}`，输出 PNG 字节。它不引用 `core` / `store`，所以�
 完整流程、prompt / JSON、闸门、存储表与运维步骤见
 [docs/JOIN-GATE.md](docs/JOIN-GATE.md)；取舍见 D-048。
 
+## 5.18 表达方式库（expression）：从群聊学习「怎么说」
+
+目标不是让模型「多说话」，而是让它用群里真实出现过的说法说话。它和两阶段润色的区别：
+润色改的是**这一条**的措辞；表达库提供的是**跨轮次**的「什么情境 -> 什么说法」候选。
+
+### 数据流
+
+```text
+一轮回复结束
+  └─ 每 expression_learn_every 轮（异步，不阻塞回复）
+        └─ 从最近 20 条对话抽 0–5 条候选（situation / style）
+              ├─ expression_review_enabled=true → 入库但 disabled，等后台审核
+              └─ false → 直接启用
+回复前
+  └─ expression_enabled=true 且 mode!=off
+        ├─ fast：本群 + 全局候选按 use_count 加权随机
+        └─ precise：把当前用户文本做 embedding，候选余弦排序；
+                    超过注入上限时再让主模型按语境选 0–inject_max 条
+              └─ 注入 systemPrompt（人设/口吻之后、记忆之前）
+```
+
+### 设置
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `expression_enabled` | false | 总开关；关闭时提示词逐字节不变 |
+| `expression_mode` | fast | `off` / `fast` / `precise`；precise 需要 embedding 端点 |
+| `expression_embedding_model` | 空 | 空 = 复用主模型；仅 precise 使用 |
+| `expression_recall_limit` | 12 | 召回候选数（4–50） |
+| `expression_inject_max` | 3 | 每轮最多注入几条（1–5） |
+| `expression_learn_enabled` | true | 关闭后只召回不再学习 |
+| `expression_learn_every` | 20 | 每 N 轮学习一次（1–100） |
+| `expression_review_enabled` | true | 学习结果先进待审（disabled），后台启用后才召回 |
+| `expression_share_global` | false | 学习结果写入全局池，所有群可见 |
+
+### 边界
+
+- 只召回**本群 + 全局**；默认不跨群。私聊表达不会注入群聊。
+- 学习/召回/选择全部 best-effort：embedding 或选择模型失败时退回 fast，仍失败就不注入；
+  召回 + 选择总预算 2 秒，绝不让表达库拖住一条回复。
+- 学习 prompt 把聊天记录当作**数据**，只输出 JSON；不会执行其中的指令。
+- 后台「表达方式」页可搜索、按群筛选、启停、删除、强化（提高 use_count）与手动新增。
+
+---
+
 ## 6. 平台硬约束（设计依据）
 
 这些都是 QQ 开放平台的规定，不是本项目的选择：
@@ -1428,7 +1474,7 @@ QQBOT_LIVE_TEST=1 ENV_FILE=../../.env go test ./internal/e2e -run TestLivePipeli
 
 ## 11. 版本与兼容性
 
-当前版本 **0.3.2**，变更记录见 [CHANGELOG.md](CHANGELOG.md)。`0.x` 阶段不承诺 API 完全冻结，
+当前版本 **0.4.0**，变更记录见 [CHANGELOG.md](CHANGELOG.md)。`0.x` 阶段不承诺 API 完全冻结，
 但会遵循 SemVer：破坏性变更进 minor，并写清迁移步骤。
 
 | 项 | 要求 / 说明 |

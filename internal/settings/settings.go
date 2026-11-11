@@ -272,6 +272,35 @@ type Settings struct {
 	JoinGateTopicDormantMinutes int `json:"join_gate_topic_dormant_minutes"`
 	JoinGateTopicClosedMinutes  int `json:"join_gate_topic_closed_minutes"`
 
+	// --- 表达方式库（expression）---
+	//
+	// 默认关闭；关闭时回复管线与没有这个库时完全一致。开启后，模型可以按
+	// 「情境 → 说法」的语料学习本群的表达习惯，并在生成前召回几条参考。
+	// 全局开关是总开关：关掉后学习、召回、注入都不发生。
+	ExpressionEnabled bool `json:"expression_enabled"`
+	// ExpressionMode picks the retrieval strategy: off / fast / precise.
+	// fast = 关键词匹配（零额外调用、零依赖）；precise = 向量召回（需要
+	// Embedding 模型，或在 expression_embedding_model 留空时复用主模型）。
+	ExpressionMode string `json:"expression_mode"`
+	// ExpressionEmbeddingModel is the embedding model used by precise mode;
+	// empty means "reuse the main model endpoint's embedding model".
+	ExpressionEmbeddingModel string `json:"expression_embedding_model"`
+	// ExpressionRecallLimit caps how many candidates one recall may return (4-50).
+	ExpressionRecallLimit int `json:"expression_recall_limit"`
+	// ExpressionInjectMax caps how many expressions reach the prompt (1-5).
+	ExpressionInjectMax int `json:"expression_inject_max"`
+	// ExpressionLearnEnabled turns on learning new expressions from finished
+	// turns. It has no effect while ExpressionEnabled is false.
+	ExpressionLearnEnabled bool `json:"expression_learn_enabled"`
+	// ExpressionLearnEvery learns once per N finished turns (1-100).
+	ExpressionLearnEvery int `json:"expression_learn_every"`
+	// ExpressionReviewEnabled queues learned expressions for review instead of
+	// enabling them immediately. Turn it off to publish straight away.
+	ExpressionReviewEnabled bool `json:"expression_review_enabled"`
+	// ExpressionShareGlobal lets expressions learned in one group be recalled in
+	// other groups too. Off keeps every expression scoped to its own group.
+	ExpressionShareGlobal bool `json:"expression_share_global"`
+
 	// --- 接入与运维（原先只存在于 .env）---
 
 	// QQAppID / QQAppSecret 是开放平台凭证。Secret 只进不出。
@@ -491,10 +520,21 @@ func Defaults() Settings {
 		// 话题寿命兜底：20 分钟没新消息算「暂歇」，180 分钟算「已结束」。
 		JoinGateTopicDormantMinutes: orInt(0, 20, 5, 240),
 		JoinGateTopicClosedMinutes:  orInt(0, 180, 30, 1440),
-		QQTransport:                 "websocket",
-		QQIntents:                   DefaultIntents,
-		QQShardCount:                1,
-		QQWebhookPath:               "/qq/webhook",
+		// 表达方式库默认关：框架在，但不改变任何现有部署的回复行为。
+		// 学习默认开（总开关关时不生效），审核默认开（学习结果先进待审）。
+		ExpressionEnabled:        false,
+		ExpressionMode:           "fast",
+		ExpressionEmbeddingModel: "",
+		ExpressionRecallLimit:    orInt(0, 12, 4, 50),
+		ExpressionInjectMax:      orInt(0, 3, 1, 5),
+		ExpressionLearnEnabled:   true,
+		ExpressionLearnEvery:     orInt(0, 20, 1, 100),
+		ExpressionReviewEnabled:  true,
+		ExpressionShareGlobal:    false,
+		QQTransport:              "websocket",
+		QQIntents:                DefaultIntents,
+		QQShardCount:             1,
+		QQWebhookPath:            "/qq/webhook",
 		// Loopback by default: the admin panel is a privileged surface, so a
 		// fresh install must not expose it on every interface. Operators who
 		// put it behind a reverse proxy set 0.0.0.0:8080 explicitly (the
@@ -975,6 +1015,20 @@ func validateRanges(s *Settings) error {
 		// 否则 closed 会在 dormant 之前触发，两个档位就失去意义。
 		problems = append(problems, "join_gate_topic_closed_minutes must be greater than join_gate_topic_dormant_minutes")
 	}
+	switch s.ExpressionMode {
+	case "", "off", "fast", "precise":
+	default:
+		problems = append(problems, "expression_mode must be off/fast/precise")
+	}
+	if s.ExpressionRecallLimit < 4 || s.ExpressionRecallLimit > 50 {
+		problems = append(problems, "expression_recall_limit must be within [4, 50]")
+	}
+	if s.ExpressionInjectMax < 1 || s.ExpressionInjectMax > 5 {
+		problems = append(problems, "expression_inject_max must be within [1, 5]")
+	}
+	if s.ExpressionLearnEvery < 1 || s.ExpressionLearnEvery > 100 {
+		problems = append(problems, "expression_learn_every must be within [1, 100]")
+	}
 	switch s.HumanizeLevel {
 	case "", "off", "soft", "medium", "strong":
 	default:
@@ -1304,6 +1358,11 @@ func normalize(s *Settings) {
 	s.OpenAIAPIKey = strings.TrimSpace(s.OpenAIAPIKey)
 	s.PolishModel = strings.TrimSpace(s.PolishModel)
 	s.JoinGateModel = strings.TrimSpace(s.JoinGateModel)
+	s.ExpressionEmbeddingModel = strings.TrimSpace(s.ExpressionEmbeddingModel)
+	if s.ExpressionMode == "" {
+		// 缺省档位是 fast；off 与总开关关闭等效，但只能由显式配置给出。
+		s.ExpressionMode = "fast"
+	}
 	if s.JoinGateMode == "" {
 		// 缺省档位是 llm；off 只能由显式配置或总开关给出。
 		s.JoinGateMode = "llm"
@@ -1555,6 +1614,39 @@ func applyKey(dst *Settings, key string, raw json.RawMessage) error {
 		return json.Unmarshal(raw, &dst.JoinGateTopicDormantMinutes)
 	case "join_gate_topic_closed_minutes":
 		return json.Unmarshal(raw, &dst.JoinGateTopicClosedMinutes)
+	case "expression_enabled":
+		return json.Unmarshal(raw, &dst.ExpressionEnabled)
+	case "expression_mode":
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return err
+		}
+		v = strings.ToLower(strings.TrimSpace(v))
+		switch v {
+		case "off", "fast", "precise":
+			dst.ExpressionMode = v
+			return nil
+		}
+		return fmt.Errorf("expression_mode must be off/fast/precise")
+	case "expression_embedding_model":
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return err
+		}
+		dst.ExpressionEmbeddingModel = strings.TrimSpace(v)
+		return nil
+	case "expression_recall_limit":
+		return json.Unmarshal(raw, &dst.ExpressionRecallLimit)
+	case "expression_inject_max":
+		return json.Unmarshal(raw, &dst.ExpressionInjectMax)
+	case "expression_learn_enabled":
+		return json.Unmarshal(raw, &dst.ExpressionLearnEnabled)
+	case "expression_learn_every":
+		return json.Unmarshal(raw, &dst.ExpressionLearnEvery)
+	case "expression_review_enabled":
+		return json.Unmarshal(raw, &dst.ExpressionReviewEnabled)
+	case "expression_share_global":
+		return json.Unmarshal(raw, &dst.ExpressionShareGlobal)
 	case "humanize_level":
 		var level string
 		if err := json.Unmarshal(raw, &level); err != nil {

@@ -231,6 +231,15 @@ bash scripts/restore-pg.sh ~/bot-harness-backups/bot-<UTC 时间戳>            
     reasoning-only 保持原有人话术（不把思维链倒给用户）；join_gate / human-status 等内部判定的
     失败文案不在透传范围。改这条路径要补 4xx/5xx/超时/鉴权/限流/密钥与 URL 泄漏测试。
 
+24. **表达方式库只学「怎么说」，不学事实，也不替记忆**（`internal/core/expressions.go`）：
+    学习异步、每 `expression_learn_every` 轮一次，只抽 situation/style；默认进待审（disabled），
+    审核后才召回。`precise` 用 embedding 余弦粗排 + 主模型按语境选 0–inject_max 条；
+    embedding/选择失败必须退回 fast 或空，不能拖住回复（召回+选择总预算 2s）。
+    只召回本群 + 全局，默认不跨群；私聊表达不得注入群聊。注入位置固定在
+    「人设/口吻之后、记忆之前」，`expression_enabled=false` 时提示词逐字节不变。
+    改这条路径要补：学习 JSON 解析/去重/超长、fast 加权、precise 排序、失败回退、
+    跨群隔离、开关关闭零变化。
+
 ## 3. 修改配置项
 
 `internal/settings` 是运行期配置的唯一入口。新增一个键的完整顺序：

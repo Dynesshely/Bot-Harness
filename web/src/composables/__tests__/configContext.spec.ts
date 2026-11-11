@@ -438,6 +438,53 @@ describe('buildPatch：只提交改动字段', () => {
     })
   })
 
+  it('表达方式库：默认值与后端 Defaults() 对齐，默认关不提交', () => {
+    const draft = emptyDraft()
+    expect(draft.expression_enabled).toBe(false)
+    expect(draft.expression_mode).toBe('fast')
+    expect(draft.expression_embedding_model).toBe('')
+    expect(draft.expression_recall_limit).toBe(12)
+    expect(draft.expression_inject_max).toBe(3)
+    expect(draft.expression_learn_enabled).toBe(true)
+    expect(draft.expression_learn_every).toBe(20)
+    expect(draft.expression_review_enabled).toBe(true)
+    expect(draft.expression_share_global).toBe(false)
+    // 与基线一致 → 补丁里不出现任何 expression_* 键（不误覆盖后端值）
+    expect(Object.keys(buildPatch(draft, emptyDraft()))).not.toContain('expression_enabled')
+  })
+
+  it('表达方式库：显式开关 / 档位 / 模型 / 数字 / 审核都会进补丁', () => {
+    const base = emptyDraft()
+    const draft = draftOf({
+      expression_enabled: true,
+      expression_mode: 'precise',
+      expression_embedding_model: 'text-embedding-3-small',
+      expression_recall_limit: 30,
+      expression_inject_max: 5,
+      expression_learn_enabled: false,
+      expression_learn_every: 5,
+      expression_review_enabled: false,
+      expression_share_global: true,
+    })
+    const patch = buildPatch(draft, base)
+    expect(patch.expression_enabled).toBe(true)
+    expect(patch.expression_mode).toBe('precise')
+    expect(patch.expression_embedding_model).toBe('text-embedding-3-small')
+    expect(patch.expression_recall_limit).toBe(30)
+    expect(patch.expression_inject_max).toBe(5)
+    // 布尔 false 是真实值（停用学习 / 审核），必须照发
+    expect(patch.expression_learn_enabled).toBe(false)
+    expect(patch.expression_review_enabled).toBe(false)
+    expect(patch.expression_learn_every).toBe(5)
+    expect(patch.expression_share_global).toBe(true)
+  })
+
+  it('表达方式库：清空 embedding 模型 = 改回复用主模型，照发空串', () => {
+    const base = draftOf({ expression_embedding_model: 'text-embedding-3-small' })
+    const draft = draftOf({ expression_embedding_model: '' })
+    expect(buildPatch(draft, base).expression_embedding_model).toBe('')
+  })
+
   it('command_panel_enabled = false 会提交（关掉启动时自动同步）', () => {
     const base = draftOf({ command_panel_enabled: true })
     expect(buildPatch(draftOf({ command_panel_enabled: false }), base)).toEqual({

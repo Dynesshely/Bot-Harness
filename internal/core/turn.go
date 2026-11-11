@@ -68,6 +68,10 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 
 	userText := in.Content
 	systemPrompt := d.promptFor(s, cfg)
+	// 表达方式库：只在本群范围内召回，注入位置在人设/口吻之后、记忆之前。
+	if block := d.expressionBlock(ctx, in, s, userText); block != "" {
+		systemPrompt = appendSystemBlock(systemPrompt, block)
+	}
 	if conv.Scene == SceneGroupShared {
 		userText = fmt.Sprintf("%s：%s", firstNonEmpty(in.MemberName, "群成员"), in.Content)
 		systemPrompt += "\n\n当前是群共享上下文：每条用户消息以「昵称：内容」的格式给出，你可以看到群里其他成员之前的发言。回复时直接回答最后一条消息即可，不要带昵称前缀。"
@@ -331,6 +335,8 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	}
 	// 后台从这一轮抽取值得长期记住的事实（默认关，每 N 轮一次）。
 	d.extractMemories(conv.ID, in, cfg, s, userText, sentText)
+	// 表达方式学习同样异步、best-effort，失败不影响这一轮。
+	d.learnExpressions(ctx, conv.ID, in, s, userText, sentText)
 	d.finishRecord(rec, "replied", "", latency)
 }
 

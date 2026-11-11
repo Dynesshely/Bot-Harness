@@ -132,6 +132,24 @@ export interface EditableDraft {
   join_gate_max_per_hour: number
   /** 每天加入上限（1–100）。 */
   join_gate_max_per_day: number
+  /** 表达方式库：总开关，默认关；关闭时回复管线与没有这个库时一致。 */
+  expression_enabled: boolean
+  /** 召回档位 off / fast / precise；fast 关键词匹配，precise 向量召回。 */
+  expression_mode: string
+  /** 向量召回使用的 embedding 模型；空串 = 复用主模型端点。 */
+  expression_embedding_model: string
+  /** 一次召回最多返回几条候选（4–50，默认 12）。 */
+  expression_recall_limit: number
+  /** 一次最多注入几条到提示词（1–5，默认 3）。 */
+  expression_inject_max: number
+  /** 从已完成的回合里学习新的表达方式（总开关关时不生效）。 */
+  expression_learn_enabled: boolean
+  /** 每 N 个回合学习一次（1–100，默认 20）。 */
+  expression_learn_every: number
+  /** 学习结果先进待审队列（后台开启 / 关闭）。 */
+  expression_review_enabled: boolean
+  /** 允许跨群共享学到的表达方式。 */
+  expression_share_global: boolean
   proactive_level: string
   proactive_ratio: number
   proactive_max_credits: number
@@ -262,6 +280,16 @@ export function emptyDraft(): EditableDraft {
     join_gate_min_interval_minutes: 5,
     join_gate_max_per_hour: 3,
     join_gate_max_per_day: 12,
+    // 表达方式库：与后端 Defaults() 对齐（总开关关、fast、复用主模型、12/3、学习与审核开、每 20 轮、不跨群）。
+    expression_enabled: false,
+    expression_mode: 'fast',
+    expression_embedding_model: '',
+    expression_recall_limit: 12,
+    expression_inject_max: 3,
+    expression_learn_enabled: true,
+    expression_learn_every: 20,
+    expression_review_enabled: true,
+    expression_share_global: false,
     proactive_level: 'off',
     proactive_ratio: 10,
     proactive_max_credits: 3,
@@ -354,6 +382,9 @@ export type NumericKey =
   | 'join_gate_min_interval_minutes'
   | 'join_gate_max_per_hour'
   | 'join_gate_max_per_day'
+  | 'expression_recall_limit'
+  | 'expression_inject_max'
+  | 'expression_learn_every'
   | 'proactive_ratio'
   | 'proactive_max_credits'
   | 'proactive_quiet_start'
@@ -503,6 +534,16 @@ export function assign(target: EditableDraft, source: EditableConfig | EditableD
   target.join_gate_min_interval_minutes = source.join_gate_min_interval_minutes ?? 5
   target.join_gate_max_per_hour = source.join_gate_max_per_hour ?? 3
   target.join_gate_max_per_day = source.join_gate_max_per_day ?? 12
+  // 表达方式库：false 与空串都是真实值（关掉 / 改回复用主模型），?? 只挡 undefined / null。
+  target.expression_enabled = source.expression_enabled ?? false
+  target.expression_mode = source.expression_mode ?? 'fast'
+  target.expression_embedding_model = source.expression_embedding_model ?? ''
+  target.expression_recall_limit = source.expression_recall_limit ?? 12
+  target.expression_inject_max = source.expression_inject_max ?? 3
+  target.expression_learn_enabled = source.expression_learn_enabled ?? true
+  target.expression_learn_every = source.expression_learn_every ?? 20
+  target.expression_review_enabled = source.expression_review_enabled ?? true
+  target.expression_share_global = source.expression_share_global ?? false
   target.proactive_level = source.proactive_level ?? 'off'
   target.proactive_ratio = source.proactive_ratio ?? 10
   target.proactive_max_credits = source.proactive_max_credits ?? 3
@@ -583,6 +624,9 @@ export const NUMERIC_PATCH_KEYS: readonly NumericKey[] = [
   'join_gate_min_interval_minutes',
   'join_gate_max_per_hour',
   'join_gate_max_per_day',
+  'expression_recall_limit',
+  'expression_inject_max',
+  'expression_learn_every',
   'proactive_ratio',
   'proactive_max_credits',
   'proactive_quiet_start',
@@ -779,6 +823,26 @@ export function buildPatch(draft: EditableDraft, base: EditableDraft): Partial<E
   }
   if (draft.join_gate_model !== base.join_gate_model) {
     changed.join_gate_model = draft.join_gate_model
+  }
+  // 表达方式库：布尔 false 是真实值（停用学习 / 审核 / 跨群共享），空串的
+  // expression_embedding_model 也是真实值（= 改回复用主模型），都必须照发。
+  if (draft.expression_enabled !== base.expression_enabled) {
+    changed.expression_enabled = draft.expression_enabled
+  }
+  if (draft.expression_mode !== base.expression_mode) {
+    changed.expression_mode = draft.expression_mode as EditableConfig['expression_mode']
+  }
+  if (draft.expression_embedding_model !== base.expression_embedding_model) {
+    changed.expression_embedding_model = draft.expression_embedding_model
+  }
+  if (draft.expression_learn_enabled !== base.expression_learn_enabled) {
+    changed.expression_learn_enabled = draft.expression_learn_enabled
+  }
+  if (draft.expression_review_enabled !== base.expression_review_enabled) {
+    changed.expression_review_enabled = draft.expression_review_enabled
+  }
+  if (draft.expression_share_global !== base.expression_share_global) {
+    changed.expression_share_global = draft.expression_share_global
   }
   if (draft.proactive_level !== base.proactive_level) {
     changed.proactive_level = draft.proactive_level

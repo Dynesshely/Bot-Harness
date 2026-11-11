@@ -1605,6 +1605,60 @@ decision 里只有截断后的预览。没有写端点：启用与参数仍走 `
   群名端点对未知群返回空串而不是 404。
 - `action` 是**派生展示字段**：非法值不会被返回，历史空串按 `joined` 回退。
 
+## 6.9 表达方式库（expression）
+
+学习与召回由回复管线在后台驱动；后台接口只做人工维护与审核。
+
+### `GET /api/expressions?group_openid=&enabled=&q=&page=&page_size=`
+
+返回 `{items,total,page,page_size}`。`enabled` 可传 `true` / `false` 过滤待审/停用；
+`q` 同时匹配 `situation` 与 `style`；`group_openid` 为空表示全部群。
+
+```json
+{
+  "items": [{
+    "id": 12, "group_openid": "GROUP_OPENID",
+    "situation": "有人问吃了吗", "style": "刚吃完，你呢",
+    "source": "learn", "use_count": 3, "enabled": true,
+    "created_at": "2026-11-11T20:00:00+08:00", "updated_at": "2026-11-11T20:00:00+08:00"
+  }],
+  "total": 1, "page": 1, "page_size": 20
+}
+```
+
+### `POST /api/expressions`
+
+```json
+{ "group_openid": "GROUP_OPENID", "situation": "有人问吃了吗", "style": "刚吃完，你呢" }
+```
+
+`group_openid` 空 = 全局表达。`situation` / `style` 必填且各 ≤200 rune。
+同一 `(group_openid,situation,style)` 重复提交不报错，返回已有行并累加 `use_count`。
+
+### `POST /api/expressions/{id}/enabled`
+
+```json
+{ "enabled": true }
+```
+
+用于审核学习结果（默认 `review_enabled=true` 时新学到的行是 disabled）。
+
+### `DELETE /api/expressions/{id}`
+
+删除一条；不存在返回 `404 not_found`。
+
+### `POST /api/expressions/{id}/reinforce`
+
+人工加权：`use_count + 1`，让这条在召回排序里更靠前。
+
+### 错误码
+
+- `invalid_request`：缺 `situation` / `style`、超长、非法 `enabled`、非法 id。
+- `not_found`：启停/删除/强化一个不存在的 id。
+- `store_error`：数据库错误；原始错误只进日志，不透出隐私。
+
+---
+
 ## 7. 统计
 
 ### `GET /api/stats?range=24h`

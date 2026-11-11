@@ -114,6 +114,11 @@ type Dispatcher struct {
 
 	// debounce folds consecutive un-@ group messages into one model turn.
 	debounce *debouncer
+
+	// exprTurns counts finished turns per conversation for periodic expression
+	// learning (lazily allocated, like memTurns).
+	exprMu    sync.Mutex
+	exprTurns map[string]int
 	// debounceCap overrides the whole-batch ceiling in tests (0 = debounceHardCap).
 	debounceCap time.Duration
 

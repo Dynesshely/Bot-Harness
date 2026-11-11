@@ -28,6 +28,18 @@
 - `web/package.json`：公开包（`private: false`）、Apache-2.0、版本 `0.1.0`、仓库地址、
   锁定 `pnpm@11.25.0`。
 
+## [0.4.0] - 2026-11-12
+
+### Added
+
+- **表达方式库（expression）**：完全对齐 MaiBot 的 expression learner / selector：
+  - 异步从真实群聊学习「什么情境 -> 什么说法」，默认进待审，后台审核后才参与召回；
+  - `fast` 档按 use_count 加权随机；`precise` 档用 OpenAI 兼容 `/embeddings` 做余弦粗排，
+    再由主模型按当前语境选 0–`expression_inject_max` 条；embedding/选择失败自动退回 fast；
+  - 只召回本群 + 全局，默认不跨群；注入位置在人设/口吻之后、记忆之前；
+  - 新增 `expressions` 表（SQLite + PostgreSQL，迁移 0015）、后台「表达方式」页与 9 个配置键；
+  - 召回+选择总预算 2 秒，学习异步，任何失败都不影响回复。
+
 ## [0.3.2] - 2026-11-11
 
 ### Added

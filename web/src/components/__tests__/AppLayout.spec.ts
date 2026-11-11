@@ -32,6 +32,7 @@ const NAV_LABELS = [
   '策略配置',
   '情绪状态',
   '自主加入',
+  '表达方式',
   '定时任务',
   '长期记忆',
   '工具调用',
@@ -58,7 +59,7 @@ function navLinks(wrapper: ReturnType<typeof mount>) {
 }
 
 describe('AppLayout 侧边栏', () => {
-  it('真路由下 10 个入口全部渲染，顺序与文案与 NAV 一致', async () => {
+  it('真路由下每个入口都渲染，顺序与文案与 NAV 一致', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     await appRouter.push('/')
     const wrapper = mountLayout(appRouter)

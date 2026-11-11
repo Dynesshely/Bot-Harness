@@ -92,6 +92,8 @@ type harness struct {
 	aiProactiveReply string
 	// aiExtractReply is what the fake model returns for the memory-extraction prompt.
 	aiExtractReply string
+	// aiExpressionReply is what the fake model returns for the expression-learn prompt.
+	aiExpressionReply string
 	// commitmentReply is the JSON verdict for a commitment nudge decision.
 	commitmentReply string
 	// humanStatusReply is the JSON array returned for a human-status inference.
@@ -395,6 +397,17 @@ func newHarness(t *testing.T) *harness {
 					return
 				}
 			}
+		}
+		// 表达方式学习请求：只输出候选 JSON。
+		if hasSystemText(body, "表达方式的学习器") {
+			h.mu.Lock()
+			verdict := h.aiExpressionReply
+			h.mu.Unlock()
+			if verdict == "" {
+				verdict = `{"candidates":[{"situation":"有人问吃了吗","style":"刚吃完，你呢"}]}`
+			}
+			writeJSONCompletion(w, verdict)
+			return
 		}
 		// 记忆抽取请求：提示词里带「提取值得长期记住的事实」，返回 JSON 数组。
 		if msgs, ok := body["messages"].([]any); ok {
