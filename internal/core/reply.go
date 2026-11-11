@@ -105,7 +105,10 @@ func (d *Dispatcher) deliver(ctx context.Context, in *Inbound, s settings.Settin
 	// 已经发出至少一条气泡时绝不重发：半截回复的语义是「失败 + 已发送的那些」，
 	// turn.go 据此记 failed，而不是把它当成一条完整成功的答复。
 	if sentAny(res) {
-		return res, err
+		d.log.Warn("reply partially delivered, remaining bubbles dropped",
+			"component", "sender", "sent", len(res.MessageIDs), "segments", res.Segments,
+			"conversation", in.GroupOpenID)
+		return res, fmt.Errorf("partial delivery (%d/%d bubbles): %w", len(res.MessageIDs), res.Segments, err)
 	}
 	if !errors.Is(err, qq.ErrPassiveWindowClosed) || forceActive {
 		return res, err

@@ -173,17 +173,17 @@ func TestSendBubblesStopsWhenContextCancelled(t *testing.T) {
 	p, sender := newBubblePlatform(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// 第一次请求成功后立刻取消：第二条之前的等待会看到 ctx.Done()。
-	p.mu.Lock()
-	p.onSend = func() { cancel() }
-	p.mu.Unlock()
 
+	// 第一条已送达，第二条前的等待被取消：这正是「半截回复」要停下的位置。
 	res, err := sender.Send(ctx, SendOptions{
 		GroupOpenID: "G1",
 		MsgID:       "MSG-IN",
 		MaxChars:    200,
 		Bubbles:     []string{"第一段。", "第二段。", "第三段。"},
-		BubblePause: func(int, string) time.Duration { return 20 * time.Millisecond },
+		BubblePause: func(index int, _ string) time.Duration {
+			cancel()
+			return 20 * time.Millisecond
+		},
 	}, "第一段。第二段。第三段。")
 	if err == nil {
 		t.Fatal("ctx 取消后应返回错误")

@@ -121,6 +121,13 @@ func (s *Sender) Send(ctx context.Context, opts SendOptions, text string) (*Send
 	start := time.Now()
 	res := &SendResult{Passive: opts.MsgID != "", Truncated: truncated, Segments: len(segments)}
 	for i, seg := range segments {
+		// Stop before doing any work once the caller cancelled: otherwise a
+		// select between an already-fired timer and ctx.Done could pick the
+		// timer at random and send one bubble past the cancellation.
+		if err := ctx.Err(); err != nil {
+			res.LatencyMS = time.Since(start).Milliseconds()
+			return res, err
+		}
 		pause := opts.SegmentPause
 		if i > 0 && opts.BubblePause != nil {
 			pause = opts.BubblePause(i-1, seg)
@@ -132,6 +139,10 @@ func (s *Sender) Send(ctx context.Context, opts SendOptions, text string) (*Send
 				res.LatencyMS = time.Since(start).Milliseconds()
 				return res, ctx.Err()
 			}
+		}
+		if err := ctx.Err(); err != nil {
+			res.LatencyMS = time.Since(start).Milliseconds()
+			return res, err
 		}
 		req := s.buildRequest(opts, seg, i+1)
 
