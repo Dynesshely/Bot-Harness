@@ -316,6 +316,7 @@ go build -o bot-harness ./cmd/bot-harness
 | 主模型出草稿后，再用一次无上下文调用按人设重写措辞 | `polish_enabled`（详见 §5.12） | 开 |
 | 正式答复是否引用触发它的那条消息（按概率） | `quote_reply_mode`（`never` / `occasionally` / `often`；旧 `quote_reply` 布尔仍兼容） | occasionally（30%） |
 | 每轮按概率临时换一种说话风格 | `reply_style_variants` + `reply_style_variant_probability` | 空（不启用）/ 0.25 |
+| 同一群的未 @ 连续消息先攒一个窗口，只让第一条跑模型 | `reply_debounce_mode`（`off` / `fast` / `natural` / `steady`）+ `reply_debounce_quiet_seconds` / `reply_debounce_active_seconds`（0–15） | natural / 2 秒 / 5 秒 |
 
 **提前回复的工作方式**：群聊不支持流式，长回答会让用户干等。开启后，模型超过 3 秒仍未产出时，
 先用**被动回复**发一句「有点复杂，让我多想会儿～稍后直接把答案发给你」；等模型给出结果，

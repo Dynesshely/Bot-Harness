@@ -33,8 +33,10 @@
 ### Added
 
 - **人情味 2.0**，吸收 MaiBot 的可用做法并接进现有管线：
-  - 群消息合并（`reply_debounce_mode`）：未 @ 的连续消息先攒 1–7 秒，只让第一条跑模型，
-    其余消息仍写时间线并留 `debounced into ...` 审计；@ / 引用机器人 / 命令零延迟。
+  - 群消息合并（`reply_debounce_mode`）：未 @ 的连续消息先攒 1–7 秒（quiet / active 两档，
+    本群最近 60 秒人类消息 ≥3 条算活跃），窗口被新消息重置但整批硬上限 20 秒；只让第一条
+    （leader）跑模型，其余消息仍写时间线并各留一条 `debounced into <leader_msg_id>` 审计；
+    @ / 引用机器人 / 命令零延迟，`off` 与秒数 0 回到逐条处理。
   - 分段气泡（`humanize_segment_split`）：长回复按标点概率拆成 1–3 条；代码块、链接、
     引用块不拆；引用只挂第一条。
   - 逐段打字（`humanize_typing_seconds_per_char` / `humanize_typing_max_seconds`）：

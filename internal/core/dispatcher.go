@@ -104,6 +104,8 @@ type Dispatcher struct {
 	quoteRoll func() float64
 	// styleRoll is the test seam for the reply-style variant roll in [0,1).
 	styleRoll func() float64
+	// splitRoll is the test seam for the bubble-split roll in [0,1).
+	splitRoll func() float64
 
 	// recentIn is a short sliding window of inbound timestamps, used only to
 	// decide whether the group currently feels busy.
@@ -112,6 +114,8 @@ type Dispatcher struct {
 
 	// debounce folds consecutive un-@ group messages into one model turn.
 	debounce *debouncer
+	// debounceCap overrides the whole-batch ceiling in tests (0 = debounceHardCap).
+	debounceCap time.Duration
 
 	// memTurns counts finished turns per conversation for periodic memory
 	// extraction (lazily allocated, like botChain).
@@ -213,6 +217,9 @@ func (d *Dispatcher) SetQuoteRoll(fn func() float64) { d.quoteRoll = fn }
 // SetStyleRoll overrides the reply-style variant roll (1 = never apply one).
 func (d *Dispatcher) SetStyleRoll(fn func() float64) { d.styleRoll = fn }
 
+// SetSplitRoll overrides the bubble-split roll (0 = always split, 1 = never).
+func (d *Dispatcher) SetSplitRoll(fn func() float64) { d.splitRoll = fn }
+
 // rollQuote returns a number in [0,1) for the quote-frequency decision.
 func (d *Dispatcher) rollQuote() float64 {
 	if d.quoteRoll != nil {
@@ -233,6 +240,18 @@ func (d *Dispatcher) Start(ctx context.Context) {
 	d.baseMu.Lock()
 	d.baseCtx = ctx
 	d.baseMu.Unlock()
+	// 进程退出时清空 pending 批次并留一条日志：每个被合并的消息都已经有自己的
+	// audit 记录，这里只记录「有几批随关闭一起放弃」。Background 的 Done 是 nil，
+	// 所以测试里不会凭空多出一个常驻 goroutine。
+	if done := ctx.Done(); done != nil && d.debounce != nil {
+		go func() {
+			<-done
+			if n := d.debounce.close(); n > 0 {
+				d.log.Info("dropped pending debounce batches on shutdown",
+					"component", "dispatch", "batches", n)
+			}
+		}()
+	}
 }
 
 // truncateForLog bounds a raw payload so a sample cannot flood the log.
@@ -657,6 +676,12 @@ func (d *Dispatcher) route(in *Inbound) {
 		return
 	}
 
+	// 群活跃度：本群最近 60 秒的人类消息数决定合并窗口取 quiet 还是 active。
+	// 记在这里而不是最上面，是为了让被策略门丢掉的消息（空内容 / 群关闭 /
+	// 白名单 / 屏蔽词）不把群算成「正在热烈讨论」；@ 与命令消息照常计数，
+	// 它们同样是「群里有人说话」的证据。
+	d.noteGroupHuman(in)
+
 	// 自主加入：未 @ 的群消息先由 join gate 判断要不要开口。它排在 trigger gate
 	// 之前，所以 at_only 群里被判定加入的消息也能继续走回复管线；总开关关闭时
 	// 这个分支根本不执行，行为与 v0.2.0 完全一致。
@@ -715,34 +740,44 @@ func (d *Dispatcher) route(in *Inbound) {
 		}
 	}
 
-	// 群消息合并：未 @ 的连续消息先攒一个很小的窗口，只让第一条跑模型。
-	// @ / 引用机器人 / 命令在上面的闸门里已经返回或属于立即路径，不经过这里。
-	// 这里必须异步等待：route 阻塞会让后续消息无法入批，合并就失效了。
-	if in.Scene == "group" && !in.AtBot && !joinedByGate {
-		if wait := d.debounceWindow(s); wait > 0 {
+	// 群消息合并：未 @ 的连续消息先攒一个很小的窗口，只让第一条（leader）跑模型。
+	// 位置很关键：它排在策略门、命令与静默判定之后，EnsureConversation 与入队之前，
+	// 所以被并进批次的消息只会 observe + audit，不会各自产生一次模型调用。
+	// @ / 引用机器人 / 命令在上面都已经返回或走立即路径，天然零延迟。
+	// 等待必须异步：route 阻塞会让后续消息无法入批，合并就失效了。
+	if in.Scene == "group" && !in.AtBot {
+		if wait := d.debounceWaitForGroup(s, in.GroupOpenID); wait > 0 {
 			batch, leader := d.debounce.enqueue(in.GroupOpenID, in, wait)
-			if !leader {
+			switch {
+			case batch == nil:
+				// 已关闭（进程退出中）：不排队，按逐条处理回到原路径。
+			case leader:
+				d.metrics.ReplyDebouncedBatches.Add(1)
+				d.log.Debug("debounce batch opened",
+					"component", "dispatch", "group_openid", in.GroupOpenID,
+					"leader_msg_id", in.MsgID, "wait_ms", wait.Milliseconds())
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							d.log.Error("panic while debouncing", "component", "dispatch", "panic", fmt.Sprint(r))
+						}
+					}()
+					if !d.waitForBatch(d.base(), batch) {
+						d.debounce.pop(in.GroupOpenID)
+						d.finishRecord(rec, "ignored", "debounce cancelled", 0)
+						return
+					}
+					d.debounce.pop(in.GroupOpenID)
+					d.dispatchToWorker(in, cfg, conv, rec)
+				}()
+				return
+			default:
+				// 批次里的后续消息：只进时间线 + 留一条可解释的审计。
 				d.metrics.ReplyDebouncedMessages.Add(1)
 				d.observe(in, conv)
-				drop("debounced into the batch's first message")
+				drop("debounced into " + batch.leaderMsgID())
 				return
 			}
-			d.metrics.ReplyDebouncedBatches.Add(1)
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						d.log.Error("panic while debouncing", "component", "dispatch", "panic", fmt.Sprint(r))
-					}
-				}()
-				if !d.waitForBatch(d.base(), batch) {
-					d.debounce.pop(in.GroupOpenID)
-					d.finishRecord(rec, "ignored", "debounce cancelled", 0)
-					return
-				}
-				d.debounce.pop(in.GroupOpenID)
-				d.dispatchToWorker(in, cfg, conv, rec)
-			}()
-			return
 		}
 	}
 

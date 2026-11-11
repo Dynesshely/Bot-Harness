@@ -139,10 +139,14 @@ type Settings struct {
 	ReplyMaxChars    int `json:"reply_max_chars"`
 	ReplyMaxSegments int `json:"reply_max_segments"`
 	// ReplyDebounceMode merges consecutive un-@ group messages into one turn:
-	// off / fast / natural / steady (default natural).
+	// off / fast / natural / steady (default natural). It is pure expression:
+	// @ / quoting the bot / commands never wait, and the merged messages keep
+	// their timeline rows plus one audit record each.
 	ReplyDebounceMode string `json:"reply_debounce_mode"`
 	// ReplyDebounceQuietSeconds / ReplyDebounceActiveSeconds are the wait windows
-	// for a quiet / busy group (0–15).
+	// for a quiet / busy group (0–15). natural uses these numbers directly; fast
+	// is fixed at 1/3 and steady at 4/7. A group counts as active once it has seen
+	// >= 3 human messages in the last 60 seconds. Zero means "do not wait".
 	ReplyDebounceQuietSeconds  int    `json:"reply_debounce_quiet_seconds"`
 	ReplyDebounceActiveSeconds int    `json:"reply_debounce_active_seconds"`
 	EarlyReplyEnabled          bool   `json:"early_reply_enabled"`

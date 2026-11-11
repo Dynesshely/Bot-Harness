@@ -59,44 +59,35 @@ func (d *Dispatcher) deliver(ctx context.Context, in *Inbound, s settings.Settin
 	}
 
 	opts := qq.SendOptions{
-		MsgID:       in.MsgID,
-		Markdown:    s.MarkdownEnabled,
-		MaxChars:    s.ReplyMaxChars,
-		MaxSegments: s.ReplyMaxSegments,
+		MsgID:        in.MsgID,
+		Markdown:     s.MarkdownEnabled,
+		MaxChars:     s.ReplyMaxChars,
+		MaxSegments:  s.ReplyMaxSegments,
+		SegmentPause: segmentPause(level, s.HumanizeDelayScale),
+		// 气泡等待优先：BubblePause 非空时 sender 用它，SegmentPause 只在
+		// 「单个气泡仍超长、被 sender 二次切开」时兜底，保证节奏一致。
 		// Empty for the "let me think" notice and the error fallbacks: those are
 		// meta messages, quoting the question under them only adds noise.
 		QuoteMessageID: quoteIndex,
 	}
-	// 分段气泡 + 逐段打字：只有 humanize 开启时才拆，off 保持单条 + 零等待。
+	// 分段气泡 + 逐段打字。只有 humanize 不是 off 时才生效：off 保持「一条、
+	// 零等待」的旧行为，逐字节可与升级前对齐。
+	//
+	// 预算按**整轮**算并扣掉模型/润色已经花掉的时间；等待顺序由 bubbleWaits
+	// 预先算好（纯函数，可单测），sender 只负责按序执行并在失败/取消时停下。
 	if level != HumanizeOff && level != "" {
-		bubbles := splitBubbles(text, s.HumanizeSegmentSplit, s.ReplyMaxChars, s.ReplyMaxSegments, nil)
+		bubbles := splitBubbles(text, s.HumanizeSegmentSplit, s.ReplyMaxChars, s.ReplyMaxSegments, d.rollSplit)
+		waits := bubbleWaits(bubbles, s.HumanizeTypingSecondsPerChar, s.HumanizeDelayScale,
+			bubblePauseBudget(s), time.Since(since))
 		if len(bubbles) > 1 {
 			opts.Bubbles = bubbles
-			remaining := bubblePauseBudget(s) - time.Since(since)
-			if remaining < 0 {
-				remaining = 0
-			}
-			spent := time.Duration(0)
-			opts.BubblePause = func(_ int, seg string) time.Duration {
-				pause := typingPause(seg, s.HumanizeTypingSecondsPerChar, s.HumanizeDelayScale)
-				if pause <= 0 || remaining <= 0 {
+			opts.BubblePause = func(index int, _ string) time.Duration {
+				if index < 0 || index >= len(waits) {
 					return 0
 				}
-				if pause > remaining-spent {
-					pause = remaining - spent
-				}
-				if pause < 0 {
-					pause = 0
-				}
-				spent += pause
-				return pause
+				return waits[index]
 			}
-		} else {
-			// 单气泡也按字数等一次，但总量受同一份预算约束。
-			opts.SegmentPause = 0
 		}
-	} else {
-		opts.SegmentPause = 0
 	}
 	if forceActive {
 		opts.MsgID = ""
@@ -110,6 +101,11 @@ func (d *Dispatcher) deliver(ctx context.Context, in *Inbound, s settings.Settin
 	res, err := d.sender.Send(ctx, opts, text)
 	if err == nil {
 		return res, nil
+	}
+	// 已经发出至少一条气泡时绝不重发：半截回复的语义是「失败 + 已发送的那些」，
+	// turn.go 据此记 failed，而不是把它当成一条完整成功的答复。
+	if sentAny(res) {
+		return res, err
 	}
 	if !errors.Is(err, qq.ErrPassiveWindowClosed) || forceActive {
 		return res, err
@@ -125,6 +121,13 @@ func (d *Dispatcher) deliver(ctx context.Context, in *Inbound, s settings.Settin
 		return activeRes, fmt.Errorf("passive reply expired and active fallback failed: %w", activeErr)
 	}
 	return activeRes, nil
+}
+
+// sentAny reports whether a SendResult already delivered at least one platform
+// message. A duplicate suppressed by the platform counts as delivered (its id is
+// empty), which is why the length is what matters, not a non-empty id.
+func sentAny(res *qq.SendResult) bool {
+	return res != nil && len(res.MessageIDs) > 0
 }
 
 func (d *Dispatcher) replyBusy(ctx context.Context, in *Inbound) {
