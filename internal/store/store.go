@@ -358,6 +358,14 @@ CREATE TABLE IF NOT EXISTS join_topics (
   analyzed_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS conversation_summaries (
+  conversation_id    TEXT PRIMARY KEY,
+  summary            TEXT NOT NULL DEFAULT '',
+  through_message_id INTEGER NOT NULL DEFAULT 0,
+  tokens             INTEGER NOT NULL DEFAULT 0,
+  updated_at         TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS expressions (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   group_openid TEXT NOT NULL DEFAULT '',
@@ -443,6 +451,7 @@ func (s *Store) runMigrations(ctx context.Context) error {
 		{"0013_affect", s.migrationAffect},
 		{"0014_join_gate", s.migrationJoinGate},
 		{"0015_expressions", s.migrationExpressions},
+		{"0016_conversation_summaries", s.migrationConversationSummaries},
 	}
 	for _, m := range migrations {
 		var applied int
@@ -1736,6 +1745,22 @@ CREATE INDEX IF NOT EXISTS idx_affect_history_conversation ON affect_history(con
 // them. The base schema already creates them for a fresh database; this
 // migration is what makes an upgrade work, and it is idempotent because
 // CREATE ... IF NOT EXISTS never touches an existing table.
+func (s *Store) migrationConversationSummaries(ctx context.Context) error {
+	_, err := s.execContext(ctx, `
+CREATE TABLE IF NOT EXISTS conversation_summaries (
+  conversation_id    TEXT PRIMARY KEY,
+  summary            TEXT NOT NULL DEFAULT '',
+  through_message_id INTEGER NOT NULL DEFAULT 0,
+  tokens             INTEGER NOT NULL DEFAULT 0,
+  updated_at         TEXT NOT NULL
+);
+`)
+	if err != nil {
+		return fmt.Errorf("create conversation_summaries table: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) migrationExpressions(ctx context.Context) error {
 	idDDL := "INTEGER PRIMARY KEY AUTOINCREMENT"
 	timeDDL := "TEXT"
