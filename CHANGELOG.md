@@ -33,6 +33,7 @@
 ### Added
 
 - systemPrompt 注入当前会话身份：群聊带 `group_openid`，私聊带 `user_openid`。管理员在聊天里
+- README 重写为项目概览：同步 0.4.x 能力，压缩手册式细节，统一「是什么 / 为什么 / 怎么用 / 怎么管 / 怎么开发」的阅读顺序。
   说「把本群设置改成…」时，模型能直接把正确 id 交给 `settings_read` / `settings_write`，
   不再反问或猜错群。id 缺失时整块省略，群聊不注入成员私聊 OpenID。
 

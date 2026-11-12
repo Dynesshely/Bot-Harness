@@ -161,7 +161,7 @@
   入站 `command`、出站 `replied`。§6 的状态表与 v1.4 逐字一致。
 - 面板项的来源是注册表：`type=command`、`name` = `usage` 首词**去前导 `/`**（平台会剥掉 `/`：
   写 `/help` 读回 `help`，投影与回读必须同形，否则每次同步都判 `updated`）、`desc` = 注册表描述
-  （≤30 rune）、`adminOnly` → `only_admin`；平台限制与排查见 README §5.13.7。
+  （≤30 rune）、`adminOnly` → `only_admin`；平台限制与排查见 README「QQ 指令面板」。
 - 自动同步与手动动作走**同一条** `Dispatcher.SyncCommandPanel`（`panelMu` 串行化），
   所以两者不会各自读到旧版本再各写一次。
 
@@ -629,7 +629,7 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
   不影响启动）；关闭后 `POST /api/actions/sync-commands` 仍可手动触发。
   **命令本身与面板无关**：关掉开关照样能在聊天里用命令，面板坏了也不影响命令执行。
   平台限制（面板 ≤ 20 个/机器人、项 ≤ 20/面板、`name` ≤ 14 / `desc` ≤ 30 字符、写 10 QPM / 读 30 QPM）
-  见 README §5.13.7；同步只碰 `remark=bot-harness:commands` 的面板，且**永不删除**。
+  见 README「QQ 指令面板」；同步只碰 `remark=bot-harness:commands` 的面板，且**永不删除**。
 - **管理员身份**：`admin_openids` 建议填 `user_openid`（应用级、跨群稳定）；填 `member_openid`
   只在该群生效。留空 = **没有任何管理员**，`run_shell` / `settings_read` / `settings_write`
   对所有人关闭（工具定义也不下发，工具内部再校验一次，审计记 `rejected`）；
@@ -1103,7 +1103,7 @@ Set-Cookie: botharness_admin=<hmac>; Path=/; HttpOnly; SameSite=Lax; MaxAge=6048
   | `failed` | 双向 | 入站：处理失败（模型/上游）；出站：投递失败（原因在 `error`） |
   | `manual` | 出站 | 后台会话详情页由管理员手动发出（§5 的 `POST …/messages`） |
 
-  `command` 的细节见 README §5.13 与 `docs/DECISIONS.md` **D-042**：命令只在
+  `command` 的细节见 README「Bot 命令」与 `docs/DECISIONS.md` **D-042**：命令只在
   `@机器人` 或私聊时识别，两种形态等价：`/name args`，或**整条消息恰为一个已注册命令名**
   （指令面板点击的形态：平台剥掉 `name` 的前导 `/`，`args` 为空 ⇒ 走命令的默认动作）。
   命令名大小写不敏感；**带参数必须带 `/`**（`tokenstats off` 不是命令）；未注册的 `/xxx`
