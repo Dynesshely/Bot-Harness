@@ -153,6 +153,37 @@ func (d *Dispatcher) converse(ctx context.Context, in *Inbound, s settings.Setti
 			return outcome, steps
 		}
 		if len(out.result.ToolCalls) == 0 {
+			// 推理模型可能把预算花在 reasoning 上，导致 content 在句子中间停止。
+			// 只重试一次，且用更大的输出预算；不改用户配置。
+			if needsCompletion(out.result) {
+				d.log.Warn("reply looks truncated, retrying with a larger budget",
+					"component", "ai", "chars", len([]rune(out.result.Text)),
+					"finish_reason", out.result.FinishReason,
+					"max_tokens", completionRetryTokens(s.MaxTokens),
+					"conversation", conv.ID)
+				retry := d.callModel(ctx, ai.ChatRequest{
+					Model: s.Model, Messages: messages, Temperature: s.Temperature,
+					MaxTokens: completionRetryTokens(s.MaxTokens), Stream: true, Tools: nil,
+				}, in, s, conv.ID, false, false)
+				if retry.result != nil {
+					outcome.usage.PromptTokens += retry.result.Usage.PromptTokens
+					outcome.usage.CompletionTokens += retry.result.Usage.CompletionTokens
+					outcome.usage.TotalTokens += retry.result.Usage.TotalTokens
+				}
+				if retry.err == nil && retry.result != nil && !needsCompletion(retry.result) {
+					out = retry
+				} else if retry.result != nil && len([]rune(retry.result.Text)) > len([]rune(out.result.Text)) {
+					// 仍然不完整，但至少更长：保留它，交给润色/发送层继续兜底。
+					out = retry
+				} else {
+					if retry.err != nil {
+						d.log.Warn("truncation retry failed; keeping the original draft",
+							"component", "ai", "error", retry.err.Error(), "conversation", conv.ID)
+					}
+					return outcome, steps
+				}
+				outcome.result, outcome.err = out.result, out.err
+			}
 			return outcome, steps
 		}
 

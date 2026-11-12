@@ -228,6 +228,8 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 		"polish_chars", len([]rune(sentText)),
 		"polish_model", polish.Model,
 		"polished", polish.Polished,
+		"draft_finish", result.FinishReason,
+		"polish_finish", polish.FinishReason,
 		"fallback", polish.Fallback,
 		"polish_latency_ms", polish.LatencyMS,
 		"draft_latency_ms", result.LatencyMS,

@@ -46,6 +46,8 @@ type polishResult struct {
 	Model string
 	// Fallback is the logged reason stage 2 did not win (empty on success).
 	Fallback string
+	// FinishReason is the provider's finish_reason (diagnostics only).
+	FinishReason string
 	// Prompt is what stage 2 was actually sent (empty when it never ran), kept
 	// only so the token estimate of a usage-less provider stays honest.
 	Prompt []ai.Message
@@ -168,12 +170,19 @@ func (d *Dispatcher) newPolish(ctx context.Context, s settings.Settings, cfg set
 		Tools: nil,
 	})
 	res.LatencyMS = time.Since(start).Milliseconds()
+	if out != nil {
+		res.FinishReason = out.FinishReason
+	}
 
 	switch {
 	case err != nil:
 		res.Fallback = "error: " + err.Error()
 	case out == nil || strings.TrimSpace(out.Text) == "":
 		res.Fallback = "empty result"
+	case strings.EqualFold(strings.TrimSpace(out.FinishReason), "length"):
+		res.Fallback = "polish output hit max_tokens"
+	case polishLooksCutOff(draft, out.Text):
+		res.Fallback = "polish output looks truncated"
 	default:
 		res.Text = out.Text
 		res.Polished = true
