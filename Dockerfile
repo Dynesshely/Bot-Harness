@@ -19,7 +19,7 @@ COPY web/ ./
 RUN pnpm build
 
 # --- stage 2: build the Go binary -------------------------------------------
-FROM golang:1.27-alpine@sha256:fa3d596898d9f126af7c01d14ee7597bab3f39cccf392ef36b69fe77cd681f18 AS build
+FROM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS build
 ARG VERSION=0.4.1
 # Module proxy is overridable for mirrors / locked-down networks. The default
 # matches the Go toolchain; "direct" keeps a working fallback when
