@@ -35,9 +35,9 @@ func TestPostgresSmoke(t *testing.T) {
 		t.Fatalf("dialect = %q, want %q", got, DriverPostgres)
 	}
 
-	// 17 tables: the sixteen store tables plus schema_migrations.
+	// 18 tables: the seventeen store tables plus schema_migrations.
 	wantTables := []string{
-		"commitments", "conversations", "dedup", "expressions", "human_status", "join_decisions",
+		"commitments", "conversation_summaries", "conversations", "dedup", "expressions", "human_status", "join_decisions",
 		"join_topics", "media", "memories", "messages", "proactive_state", "records",
 		"scheduled_tasks", "schema_migrations", "settings", "stats", "tool_calls",
 	}

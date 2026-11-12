@@ -119,6 +119,10 @@ type Dispatcher struct {
 	// learning (lazily allocated, like memTurns).
 	exprMu    sync.Mutex
 	exprTurns map[string]int
+
+	// compacting serializes background compaction per conversation.
+	compactMu  sync.Mutex
+	compacting map[string]bool
 	// debounceCap overrides the whole-batch ceiling in tests (0 = debounceHardCap).
 	debounceCap time.Duration
 

@@ -882,7 +882,7 @@ func validateRanges(s *Settings) error {
 	if s.RequestTimeoutSeconds < 5 || s.RequestTimeoutSeconds > 600 {
 		problems = append(problems, "request_timeout_seconds must be within [5, 600]")
 	}
-	if s.ContextMaxTurns < 1 || s.ContextMaxTurns > 100 {
+	if s.ContextMaxTurns < 1 || s.ContextMaxTurns > 5000 {
 		problems = append(problems, "context_max_turns must be within [1, 100]")
 	}
 	if s.ContextMaxTokens < 256 || s.ContextMaxTokens > 10_000_000 {

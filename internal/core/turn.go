@@ -57,10 +57,20 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	defer unlock()
 
 	start := time.Now()
-	history, err := d.st.RecentMessages(ctx, conv.ID, s.ContextMaxTurns*2,
+	history, err := d.st.RecentMessages(ctx, conv.ID, historyLimit(s),
 		cfg.ContextScope == settings.ContextIncludeUnaddressed)
 	if err != nil {
 		d.log.Warn("failed to load history", "component", "store", "error", err.Error())
+	}
+	// 有滚动摘要时只加载摘要之后的消息；原消息仍在时间线里。
+	summary, sumErr := d.st.GetConversationSummary(ctx, conv.ID)
+	if sumErr != nil {
+		d.log.Debug("failed to load context summary", "component", "compact", "error", sumErr.Error())
+	} else if summary.ThroughMessageID > 0 {
+		history, err = d.st.MessagesAfter(ctx, conv.ID, summary.ThroughMessageID, historyLimit(s))
+		if err != nil {
+			d.log.Warn("failed to load messages after summary", "component", "store", "error", err.Error())
+		}
 	}
 
 	// 缓存过期且消息够了就在后台刷新一次；本轮仍用现有缓存，不阻塞。
@@ -74,6 +84,10 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	}
 	// 表达方式库：只在本群范围内召回，注入位置在人设/口吻之后、记忆之前。
 	if block := d.expressionBlock(ctx, in, s, userText); block != "" {
+		systemPrompt = appendSystemBlock(systemPrompt, block)
+	}
+	// 长会话的旧消息已被压缩成摘要；放在表达层之后、记忆之前。
+	if block := compactSummaryBlock(summary.Summary); block != "" {
 		systemPrompt = appendSystemBlock(systemPrompt, block)
 	}
 	if conv.Scene == SceneGroupShared {
@@ -343,6 +357,8 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	d.extractMemories(conv.ID, in, cfg, s, userText, sentText)
 	// 表达方式学习同样异步、best-effort，失败不影响这一轮。
 	d.learnExpressions(ctx, conv.ID, in, s, userText, sentText)
+	// 旧的上下文在后台压缩；不阻塞这一轮，也不删除原消息。
+	d.startCompaction(conv.ID, s)
 	d.finishRecord(rec, "replied", "", latency)
 }
 
