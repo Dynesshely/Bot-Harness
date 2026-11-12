@@ -50,6 +50,13 @@ type SendOptions struct {
 	SegmentPause time.Duration
 	MaxChars     int
 	MaxSegments  int
+	// Bubbles optionally supplies pre-split bubbles (one human reply broken into
+	// several messages). When set, they replace the maxChars-based first split but
+	// still get re-split if a single bubble exceeds MaxChars.
+	Bubbles []string
+	// BubblePause, when set, computes the wait before segment i (i > 0); it takes
+	// precedence over SegmentPause. index is the segment's sequence number - 1.
+	BubblePause func(index int, text string) time.Duration
 }
 
 // SendResult reports what was actually delivered.
@@ -87,7 +94,14 @@ func (s *Sender) Send(ctx context.Context, opts SendOptions, text string) (*Send
 		maxSegments = 20
 	}
 
-	segments := SplitText(text, maxChars)
+	var segments []string
+	if len(opts.Bubbles) > 0 {
+		for _, bubble := range opts.Bubbles {
+			segments = append(segments, SplitText(bubble, maxChars)...)
+		}
+	} else {
+		segments = SplitText(text, maxChars)
+	}
 	truncated := false
 	if len(segments) == 0 {
 		return &SendResult{}, nil
@@ -107,13 +121,28 @@ func (s *Sender) Send(ctx context.Context, opts SendOptions, text string) (*Send
 	start := time.Now()
 	res := &SendResult{Passive: opts.MsgID != "", Truncated: truncated, Segments: len(segments)}
 	for i, seg := range segments {
-		if i > 0 && opts.SegmentPause > 0 {
+		// Stop before doing any work once the caller cancelled: otherwise a
+		// select between an already-fired timer and ctx.Done could pick the
+		// timer at random and send one bubble past the cancellation.
+		if err := ctx.Err(); err != nil {
+			res.LatencyMS = time.Since(start).Milliseconds()
+			return res, err
+		}
+		pause := opts.SegmentPause
+		if i > 0 && opts.BubblePause != nil {
+			pause = opts.BubblePause(i-1, seg)
+		}
+		if i > 0 && pause > 0 {
 			select {
-			case <-time.After(opts.SegmentPause):
+			case <-time.After(pause):
 			case <-ctx.Done():
 				res.LatencyMS = time.Since(start).Milliseconds()
 				return res, ctx.Err()
 			}
+		}
+		if err := ctx.Err(); err != nil {
+			res.LatencyMS = time.Since(start).Milliseconds()
+			return res, err
 		}
 		req := s.buildRequest(opts, seg, i+1)
 

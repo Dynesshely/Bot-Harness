@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"os"
 	"strings"
 	"sync"
@@ -99,11 +100,27 @@ type Dispatcher struct {
 
 	// silenceRoll is a test seam for the humanize silence roll (1 = never).
 	silenceRoll func() float64
+	// quoteRoll is the test seam for the quote-frequency roll in [0,1).
+	quoteRoll func() float64
+	// styleRoll is the test seam for the reply-style variant roll in [0,1).
+	styleRoll func() float64
+	// splitRoll is the test seam for the bubble-split roll in [0,1).
+	splitRoll func() float64
 
 	// recentIn is a short sliding window of inbound timestamps, used only to
 	// decide whether the group currently feels busy.
 	recentMu sync.Mutex
 	recentIn []time.Time
+
+	// debounce folds consecutive un-@ group messages into one model turn.
+	debounce *debouncer
+
+	// exprTurns counts finished turns per conversation for periodic expression
+	// learning (lazily allocated, like memTurns).
+	exprMu    sync.Mutex
+	exprTurns map[string]int
+	// debounceCap overrides the whole-batch ceiling in tests (0 = debounceHardCap).
+	debounceCap time.Duration
 
 	// memTurns counts finished turns per conversation for periodic memory
 	// extraction (lazily allocated, like botChain).
@@ -166,6 +183,7 @@ func New(opts Options) *Dispatcher {
 		commands: map[string]*command{},
 		prompt:   prompt,
 		baseCtx:  context.Background(),
+		debounce: newDebouncer(),
 	}
 	d.registerBuiltinCommands()
 	if d.identity != nil {
@@ -197,10 +215,48 @@ func New(opts Options) *Dispatcher {
 // SetSilenceRoll overrides the humanize silence roll (tests inject 1 = never).
 func (d *Dispatcher) SetSilenceRoll(fn func() float64) { d.silenceRoll = fn }
 
+// SetQuoteRoll overrides the quote-frequency roll so tests can pin a band
+// (0.1 quotes under "often", 0.5 does not under "occasionally").
+func (d *Dispatcher) SetQuoteRoll(fn func() float64) { d.quoteRoll = fn }
+
+// SetStyleRoll overrides the reply-style variant roll (1 = never apply one).
+func (d *Dispatcher) SetStyleRoll(fn func() float64) { d.styleRoll = fn }
+
+// SetSplitRoll overrides the bubble-split roll (0 = always split, 1 = never).
+func (d *Dispatcher) SetSplitRoll(fn func() float64) { d.splitRoll = fn }
+
+// rollQuote returns a number in [0,1) for the quote-frequency decision.
+func (d *Dispatcher) rollQuote() float64 {
+	if d.quoteRoll != nil {
+		return d.quoteRoll()
+	}
+	return rand.Float64()
+}
+
+// rollStyle returns a number in [0,1) for the reply-style variant decision.
+func (d *Dispatcher) rollStyle() float64 {
+	if d.styleRoll != nil {
+		return d.styleRoll()
+	}
+	return rand.Float64()
+}
+
 func (d *Dispatcher) Start(ctx context.Context) {
 	d.baseMu.Lock()
 	d.baseCtx = ctx
 	d.baseMu.Unlock()
+	// 进程退出时清空 pending 批次并留一条日志：每个被合并的消息都已经有自己的
+	// audit 记录，这里只记录「有几批随关闭一起放弃」。Background 的 Done 是 nil，
+	// 所以测试里不会凭空多出一个常驻 goroutine。
+	if done := ctx.Done(); done != nil && d.debounce != nil {
+		go func() {
+			<-done
+			if n := d.debounce.close(); n > 0 {
+				d.log.Info("dropped pending debounce batches on shutdown",
+					"component", "dispatch", "batches", n)
+			}
+		}()
+	}
 }
 
 // truncateForLog bounds a raw payload so a sample cannot flood the log.
@@ -625,6 +681,12 @@ func (d *Dispatcher) route(in *Inbound) {
 		return
 	}
 
+	// 群活跃度：本群最近 60 秒的人类消息数决定合并窗口取 quiet 还是 active。
+	// 记在这里而不是最上面，是为了让被策略门丢掉的消息（空内容 / 群关闭 /
+	// 白名单 / 屏蔽词）不把群算成「正在热烈讨论」；@ 与命令消息照常计数，
+	// 它们同样是「群里有人说话」的证据。
+	d.noteGroupHuman(in)
+
 	// 自主加入：未 @ 的群消息先由 join gate 判断要不要开口。它排在 trigger gate
 	// 之前，所以 at_only 群里被判定加入的消息也能继续走回复管线；总开关关闭时
 	// 这个分支根本不执行，行为与 v0.2.0 完全一致。
@@ -683,6 +745,53 @@ func (d *Dispatcher) route(in *Inbound) {
 		}
 	}
 
+	// 群消息合并：未 @ 的连续消息先攒一个很小的窗口，只让第一条（leader）跑模型。
+	// 位置很关键：它排在策略门、命令与静默判定之后，EnsureConversation 与入队之前，
+	// 所以被并进批次的消息只会 observe + audit，不会各自产生一次模型调用。
+	// @ / 引用机器人 / 命令在上面都已经返回或走立即路径，天然零延迟。
+	// 等待必须异步：route 阻塞会让后续消息无法入批，合并就失效了。
+	if in.Scene == "group" && !in.AtBot {
+		if wait := d.debounceWaitForGroup(s, in.GroupOpenID); wait > 0 {
+			batch, leader := d.debounce.enqueue(in.GroupOpenID, in, wait)
+			switch {
+			case batch == nil:
+				// 已关闭（进程退出中）：不排队，按逐条处理回到原路径。
+			case leader:
+				d.metrics.ReplyDebouncedBatches.Add(1)
+				d.log.Debug("debounce batch opened",
+					"component", "dispatch", "group_openid", in.GroupOpenID,
+					"leader_msg_id", in.MsgID, "wait_ms", wait.Milliseconds())
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							d.log.Error("panic while debouncing", "component", "dispatch", "panic", fmt.Sprint(r))
+						}
+					}()
+					if !d.waitForBatch(d.base(), batch) {
+						d.debounce.pop(in.GroupOpenID)
+						d.finishRecord(rec, "ignored", "debounce cancelled", 0)
+						return
+					}
+					d.debounce.pop(in.GroupOpenID)
+					d.dispatchToWorker(in, cfg, conv, rec)
+				}()
+				return
+			default:
+				// 批次里的后续消息：只进时间线 + 留一条可解释的审计。
+				d.metrics.ReplyDebouncedMessages.Add(1)
+				d.observe(in, conv)
+				drop("debounced into " + batch.leaderMsgID())
+				return
+			}
+		}
+	}
+
+	d.dispatchToWorker(in, cfg, conv, rec)
+}
+
+// dispatchToWorker persists the conversation and hands one message to a bounded
+// worker. Shared by the immediate path and the debounced batch leader.
+func (d *Dispatcher) dispatchToWorker(in *Inbound, cfg settings.GroupConfig, conv convTarget, rec *store.Record) {
 	if err := d.st.EnsureConversation(context.Background(), &store.Conversation{
 		ID:           conv.ID,
 		Scene:        conv.Scene,

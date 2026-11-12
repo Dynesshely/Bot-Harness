@@ -1,5 +1,5 @@
 // 设置页共享上下文：多级子页面共用同一份 draft / patch / 保存逻辑。
-import type { InjectionKey } from 'vue'
+import type { InjectionKey, Ref } from 'vue'
 import { inject, provide } from 'vue'
 import type { ConfigData, EditableConfig, TestAiResult } from '@/api/types'
 
@@ -43,7 +43,25 @@ export interface EditableDraft {
   exec_max_output_bytes: number
   humanize_level: string
   humanize_delay_scale: number
+  /** 分段气泡档位 off/soft/medium/strong；off = 一条发完。 */
+  humanize_segment_split: string
+  /** 每条气泡前的模拟打字速度（秒/字，0.05–1）。 */
+  humanize_typing_seconds_per_char: number
+  /** 整轮模拟打字的等待上限（秒，0–30）。 */
+  humanize_typing_max_seconds: number
+  /** 群消息合并档位 off/fast/natural/steady。 */
+  reply_debounce_mode: string
+  /** 安静群的合并窗口（秒，0–15）。 */
+  reply_debounce_quiet_seconds: number
+  /** 活跃群的合并窗口（秒，0–15）。 */
+  reply_debounce_active_seconds: number
   persona: string
+  /** 引用频率分档 never/occasionally/often（策略页负责，但保存走 config）。 */
+  quote_reply_mode: string
+  /** 口吻轮换：备用说话方式（每轮按概率抽一条追加到系统提示词）。 */
+  reply_style_variants: string[]
+  /** 应用一条口吻变体的概率（0–1，默认 0.25）。 */
+  reply_style_variant_probability: number | null
   /** 两阶段生成：草稿 → 润色。关掉就只用主模型一次生成。 */
   polish_enabled: boolean
   /** 润色模型名；空串 = 使用主模型。 */
@@ -114,6 +132,24 @@ export interface EditableDraft {
   join_gate_max_per_hour: number
   /** 每天加入上限（1–100）。 */
   join_gate_max_per_day: number
+  /** 表达方式库：总开关，默认关；关闭时回复管线与没有这个库时一致。 */
+  expression_enabled: boolean
+  /** 召回档位 off / fast / precise；fast 关键词匹配，precise 向量召回。 */
+  expression_mode: string
+  /** 向量召回使用的 embedding 模型；空串 = 复用主模型端点。 */
+  expression_embedding_model: string
+  /** 一次召回最多返回几条候选（4–50，默认 12）。 */
+  expression_recall_limit: number
+  /** 一次最多注入几条到提示词（1–5，默认 3）。 */
+  expression_inject_max: number
+  /** 从已完成的回合里学习新的表达方式（总开关关时不生效）。 */
+  expression_learn_enabled: boolean
+  /** 每 N 个回合学习一次（1–100，默认 20）。 */
+  expression_learn_every: number
+  /** 学习结果先进待审队列（后台开启 / 关闭）。 */
+  expression_review_enabled: boolean
+  /** 允许跨群共享学到的表达方式。 */
+  expression_share_global: boolean
   proactive_level: string
   proactive_ratio: number
   proactive_max_credits: number
@@ -194,7 +230,17 @@ export function emptyDraft(): EditableDraft {
     exec_max_output_bytes: 8192,
     humanize_level: 'medium',
     humanize_delay_scale: 1,
+    humanize_segment_split: 'medium',
+    humanize_typing_seconds_per_char: 0.3,
+    humanize_typing_max_seconds: 12,
+    reply_debounce_mode: 'natural',
+    reply_debounce_quiet_seconds: 2,
+    reply_debounce_active_seconds: 5,
     persona: '',
+    quote_reply_mode: 'occasionally',
+    // 口吻轮换默认不启用（空数组）；概率与后端 Defaults() 对齐为 0.25。
+    reply_style_variants: [],
+    reply_style_variant_probability: 0.25,
     // 两阶段生成：与后端 Defaults() 对齐（默认开、主模型、0.7、0=自动、20s、0=不设下限）。
     polish_enabled: true,
     polish_model: '',
@@ -234,6 +280,16 @@ export function emptyDraft(): EditableDraft {
     join_gate_min_interval_minutes: 5,
     join_gate_max_per_hour: 3,
     join_gate_max_per_day: 12,
+    // 表达方式库：与后端 Defaults() 对齐（总开关关、fast、复用主模型、12/3、学习与审核开、每 20 轮、不跨群）。
+    expression_enabled: false,
+    expression_mode: 'fast',
+    expression_embedding_model: '',
+    expression_recall_limit: 12,
+    expression_inject_max: 3,
+    expression_learn_enabled: true,
+    expression_learn_every: 20,
+    expression_review_enabled: true,
+    expression_share_global: false,
     proactive_level: 'off',
     proactive_ratio: 10,
     proactive_max_credits: 3,
@@ -305,6 +361,10 @@ export type NumericKey =
   | 'media_max_bytes'
   | 'exec_max_output_bytes'
   | 'humanize_delay_scale'
+  | 'humanize_typing_seconds_per_char'
+  | 'humanize_typing_max_seconds'
+  | 'reply_debounce_quiet_seconds'
+  | 'reply_debounce_active_seconds'
   | 'tasks_max_per_member'
   | 'tasks_max_delay_hours'
   | 'commitment_max_open_per_member'
@@ -322,6 +382,9 @@ export type NumericKey =
   | 'join_gate_min_interval_minutes'
   | 'join_gate_max_per_hour'
   | 'join_gate_max_per_day'
+  | 'expression_recall_limit'
+  | 'expression_inject_max'
+  | 'expression_learn_every'
   | 'proactive_ratio'
   | 'proactive_max_credits'
   | 'proactive_quiet_start'
@@ -331,6 +394,7 @@ export type NumericKey =
   | 'polish_max_tokens'
   | 'polish_timeout_seconds'
   | 'polish_min_chars'
+  | 'reply_style_variant_probability'
 
 export const MODEL_PARAM_KEYS = [
   'temperature',
@@ -421,7 +485,16 @@ export function assign(target: EditableDraft, source: EditableConfig | EditableD
   target.exec_max_output_bytes = source.exec_max_output_bytes ?? 8192
   target.humanize_level = source.humanize_level ?? 'medium'
   target.humanize_delay_scale = source.humanize_delay_scale ?? 1
+  target.humanize_segment_split = source.humanize_segment_split ?? 'medium'
+  target.humanize_typing_seconds_per_char = source.humanize_typing_seconds_per_char ?? 0.3
+  target.humanize_typing_max_seconds = source.humanize_typing_max_seconds ?? 12
+  target.reply_debounce_mode = source.reply_debounce_mode ?? 'natural'
+  target.reply_debounce_quiet_seconds = source.reply_debounce_quiet_seconds ?? 2
+  target.reply_debounce_active_seconds = source.reply_debounce_active_seconds ?? 5
   target.persona = source.persona ?? ''
+  target.quote_reply_mode = source.quote_reply_mode ?? ('quote_reply' in source && source.quote_reply === false ? 'never' : 'occasionally')
+  target.reply_style_variants = [...(source.reply_style_variants ?? [])]
+  target.reply_style_variant_probability = source.reply_style_variant_probability ?? 0.25
   target.polish_enabled = source.polish_enabled ?? true
   target.polish_model = source.polish_model ?? ''
   // ?? 只挡 undefined / null：后端下发的 0（自动 / 不设下限）必须原样留下。
@@ -461,6 +534,16 @@ export function assign(target: EditableDraft, source: EditableConfig | EditableD
   target.join_gate_min_interval_minutes = source.join_gate_min_interval_minutes ?? 5
   target.join_gate_max_per_hour = source.join_gate_max_per_hour ?? 3
   target.join_gate_max_per_day = source.join_gate_max_per_day ?? 12
+  // 表达方式库：false 与空串都是真实值（关掉 / 改回复用主模型），?? 只挡 undefined / null。
+  target.expression_enabled = source.expression_enabled ?? false
+  target.expression_mode = source.expression_mode ?? 'fast'
+  target.expression_embedding_model = source.expression_embedding_model ?? ''
+  target.expression_recall_limit = source.expression_recall_limit ?? 12
+  target.expression_inject_max = source.expression_inject_max ?? 3
+  target.expression_learn_enabled = source.expression_learn_enabled ?? true
+  target.expression_learn_every = source.expression_learn_every ?? 20
+  target.expression_review_enabled = source.expression_review_enabled ?? true
+  target.expression_share_global = source.expression_share_global ?? false
   target.proactive_level = source.proactive_level ?? 'off'
   target.proactive_ratio = source.proactive_ratio ?? 10
   target.proactive_max_credits = source.proactive_max_credits ?? 3
@@ -520,6 +603,10 @@ export const NUMERIC_PATCH_KEYS: readonly NumericKey[] = [
   'media_max_bytes',
   'exec_max_output_bytes',
   'humanize_delay_scale',
+  'humanize_typing_seconds_per_char',
+  'humanize_typing_max_seconds',
+  'reply_debounce_quiet_seconds',
+  'reply_debounce_active_seconds',
   'tasks_max_per_member',
   'tasks_max_delay_hours',
   'commitment_max_open_per_member',
@@ -537,6 +624,9 @@ export const NUMERIC_PATCH_KEYS: readonly NumericKey[] = [
   'join_gate_min_interval_minutes',
   'join_gate_max_per_hour',
   'join_gate_max_per_day',
+  'expression_recall_limit',
+  'expression_inject_max',
+  'expression_learn_every',
   'proactive_ratio',
   'proactive_max_credits',
   'proactive_quiet_start',
@@ -546,6 +636,7 @@ export const NUMERIC_PATCH_KEYS: readonly NumericKey[] = [
   'polish_max_tokens',
   'polish_timeout_seconds',
   'polish_min_chars',
+  'reply_style_variant_probability',
 ]
 
 /**
@@ -649,8 +740,33 @@ export function buildPatch(draft: EditableDraft, base: EditableDraft): Partial<E
   if (draft.humanize_delay_scale !== base.humanize_delay_scale) {
     changed.humanize_delay_scale = draft.humanize_delay_scale
   }
+  if (draft.humanize_segment_split !== base.humanize_segment_split) {
+    changed.humanize_segment_split = draft.humanize_segment_split
+  }
+  if (draft.humanize_typing_seconds_per_char !== base.humanize_typing_seconds_per_char) {
+    changed.humanize_typing_seconds_per_char = draft.humanize_typing_seconds_per_char
+  }
+  if (draft.humanize_typing_max_seconds !== base.humanize_typing_max_seconds) {
+    changed.humanize_typing_max_seconds = draft.humanize_typing_max_seconds
+  }
+  if (draft.reply_debounce_mode !== base.reply_debounce_mode) {
+    changed.reply_debounce_mode = draft.reply_debounce_mode
+  }
+  if (draft.reply_debounce_quiet_seconds !== base.reply_debounce_quiet_seconds) {
+    changed.reply_debounce_quiet_seconds = draft.reply_debounce_quiet_seconds
+  }
+  if (draft.reply_debounce_active_seconds !== base.reply_debounce_active_seconds) {
+    changed.reply_debounce_active_seconds = draft.reply_debounce_active_seconds
+  }
   if (draft.persona !== base.persona) {
     changed.persona = draft.persona
+  }
+  if (draft.quote_reply_mode !== base.quote_reply_mode) {
+    changed.quote_reply_mode = draft.quote_reply_mode
+  }
+  // 口吻轮换：整行比较（顺序变了也算改动）；空数组是真实值（= 关闭）。
+  if (draft.reply_style_variants.join('\n') !== (base.reply_style_variants ?? []).join('\n')) {
+    changed.reply_style_variants = draft.reply_style_variants
   }
   // 两阶段生成：布尔 false 是真实值（关掉润色），照发；空串的 polish_model 也是真实值
   // （= 改回「使用主模型」），和秘密字段的「空 = 没动」不同。
@@ -708,6 +824,26 @@ export function buildPatch(draft: EditableDraft, base: EditableDraft): Partial<E
   if (draft.join_gate_model !== base.join_gate_model) {
     changed.join_gate_model = draft.join_gate_model
   }
+  // 表达方式库：布尔 false 是真实值（停用学习 / 审核 / 跨群共享），空串的
+  // expression_embedding_model 也是真实值（= 改回复用主模型），都必须照发。
+  if (draft.expression_enabled !== base.expression_enabled) {
+    changed.expression_enabled = draft.expression_enabled
+  }
+  if (draft.expression_mode !== base.expression_mode) {
+    changed.expression_mode = draft.expression_mode as EditableConfig['expression_mode']
+  }
+  if (draft.expression_embedding_model !== base.expression_embedding_model) {
+    changed.expression_embedding_model = draft.expression_embedding_model
+  }
+  if (draft.expression_learn_enabled !== base.expression_learn_enabled) {
+    changed.expression_learn_enabled = draft.expression_learn_enabled
+  }
+  if (draft.expression_review_enabled !== base.expression_review_enabled) {
+    changed.expression_review_enabled = draft.expression_review_enabled
+  }
+  if (draft.expression_share_global !== base.expression_share_global) {
+    changed.expression_share_global = draft.expression_share_global
+  }
   if (draft.proactive_level !== base.proactive_level) {
     changed.proactive_level = draft.proactive_level
   }
@@ -758,43 +894,68 @@ export function validateDraft(draft: EditableDraft): string {
 }
 
 
-/** 分区页面从布局拿到的全部状态与动作。值由布局里的 reactive 容器提供（ref 会被自动解包）。 */
+/**
+ * 分区页面从布局拿到的全部状态与动作。
+ *
+ * **状态字段里除了 `draft` / `loaded` 两个 reactive 草稿，其余都是 ref**：
+ * 模板里直接读（`{{ error }}`、`:open="promptOpen"`）会自动解包，脚本里要写 `.value`。
+ *
+ * 为什么不是「reactive 容器里放 ref、子页解构出值」：解构拿到的是**那一刻的快照**，
+ * 之后布局里改 ref 子页不会重渲染（弹窗永远打不开、模型列表永远空着）。
+ * 所以这里 provide 的是 ref 本身。
+ *
+ * **子页不要直接给这些字段赋值**（尤其不能写 `promptOpen = true`）：
+ * 走下面的动作方法，语义更清楚，也把「打开 / 关闭」收敛在一处。
+ * 历史教训：ref 被塞进 reactive 容器后解构成普通 boolean，
+ * 模板里的 `promptOpen = true` 被编译成 `promptOpen.value = true`，
+ * 运行期直接抛 `Cannot create property 'value' on boolean 'false'`。
+ */
 export interface ConfigContext {
   draft: EditableDraft
-  loaded: EditableDraft
-  config: ConfigData | null
-  error: string
-  loading: boolean
-  saving: boolean
-  dirty: boolean
+  loaded: Ref<EditableDraft>
+  config: Ref<ConfigData | null>
+  error: Ref<string>
+  loading: Ref<boolean>
+  saving: Ref<boolean>
+  dirty: Ref<boolean>
   /** 非空表示本地校验没过：保存按钮应禁用，文案即原因。 */
-  validationError: string
-  restartRequired: string[]
-  apiKeySource: string
-  readonlyEntries: { key: string; label: string; value: string }[]
-  modelIds: string[]
-  modelsBaseUrl: string
-  modelsFetchedAt: string
-  modelsLoading: boolean
-  modelsError: string
-  customModel: boolean
-  modelMissingFromList: boolean
-  promptOpen: boolean
-  modelParamsOpen: boolean
-  modelParamsDirtyCount: number
-  actionLoading: '' | 'reconnect' | 'token' | 'reset'
-  resetConfigOpen: boolean
-  aiOpen: boolean
-  aiPrompt: string
-  aiRunning: boolean
-  aiResult: TestAiResult | null
-  aiError: string
-  sendGroup: string
-  sendContent: string
-  sending: boolean
-  sendResult: string
-  sendError: string
-  loggingOut: boolean
+  validationError: Ref<string>
+  restartRequired: Ref<string[]>
+  apiKeySource: Ref<string>
+  readonlyEntries: Ref<{ key: string; label: string; value: string }[]>
+  modelIds: Ref<string[]>
+  modelsBaseUrl: Ref<string>
+  modelsFetchedAt: Ref<string>
+  modelsLoading: Ref<boolean>
+  modelsError: Ref<string>
+  customModel: Ref<boolean>
+  modelMissingFromList: Ref<boolean>
+  promptOpen: Ref<boolean>
+  modelParamsOpen: Ref<boolean>
+  modelParamsDirtyCount: Ref<number>
+  actionLoading: Ref<'' | 'reconnect' | 'token' | 'reset'>
+  resetConfigOpen: Ref<boolean>
+  aiOpen: Ref<boolean>
+  aiPrompt: Ref<string>
+  aiRunning: Ref<boolean>
+  aiResult: Ref<TestAiResult | null>
+  aiError: Ref<string>
+  sendGroup: Ref<string>
+  sendContent: Ref<string>
+  sending: Ref<boolean>
+  sendResult: Ref<string>
+  sendError: Ref<string>
+  loggingOut: Ref<boolean>
+  /** 打开系统提示词大屏编辑弹窗。子页不要直接给 promptOpen 赋值。 */
+  openPrompt: () => void
+  closePrompt: () => void
+  /** 切换「手动输入模型」与「从列表选择」。 */
+  toggleCustomModel: () => void
+  /** 展开 / 折叠模型参数面板。 */
+  toggleModelParams: () => void
+  closeTestAi: () => void
+  openResetConfig: () => void
+  cancelResetConfig: () => void
   save: () => Promise<void>
   discard: () => void
   reload: () => Promise<void>

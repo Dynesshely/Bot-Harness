@@ -61,12 +61,33 @@ func (d *Dispatcher) deliver(ctx context.Context, in *Inbound, s settings.Settin
 	opts := qq.SendOptions{
 		MsgID:        in.MsgID,
 		Markdown:     s.MarkdownEnabled,
-		SegmentPause: segmentPause(level, s.HumanizeDelayScale),
 		MaxChars:     s.ReplyMaxChars,
 		MaxSegments:  s.ReplyMaxSegments,
+		SegmentPause: segmentPause(level, s.HumanizeDelayScale),
+		// 气泡等待优先：BubblePause 非空时 sender 用它，SegmentPause 只在
+		// 「单个气泡仍超长、被 sender 二次切开」时兜底，保证节奏一致。
 		// Empty for the "let me think" notice and the error fallbacks: those are
 		// meta messages, quoting the question under them only adds noise.
 		QuoteMessageID: quoteIndex,
+	}
+	// 分段气泡 + 逐段打字。只有 humanize 不是 off 时才生效：off 保持「一条、
+	// 零等待」的旧行为，逐字节可与升级前对齐。
+	//
+	// 预算按**整轮**算并扣掉模型/润色已经花掉的时间；等待顺序由 bubbleWaits
+	// 预先算好（纯函数，可单测），sender 只负责按序执行并在失败/取消时停下。
+	if level != HumanizeOff && level != "" {
+		bubbles := splitBubbles(text, s.HumanizeSegmentSplit, s.ReplyMaxChars, s.ReplyMaxSegments, d.rollSplit)
+		waits := bubbleWaits(bubbles, s.HumanizeTypingSecondsPerChar, s.HumanizeDelayScale,
+			bubblePauseBudget(s), time.Since(since))
+		if len(bubbles) > 1 {
+			opts.Bubbles = bubbles
+			opts.BubblePause = func(index int, _ string) time.Duration {
+				if index < 0 || index >= len(waits) {
+					return 0
+				}
+				return waits[index]
+			}
+		}
 	}
 	if forceActive {
 		opts.MsgID = ""
@@ -80,6 +101,14 @@ func (d *Dispatcher) deliver(ctx context.Context, in *Inbound, s settings.Settin
 	res, err := d.sender.Send(ctx, opts, text)
 	if err == nil {
 		return res, nil
+	}
+	// 已经发出至少一条气泡时绝不重发：半截回复的语义是「失败 + 已发送的那些」，
+	// turn.go 据此记 failed，而不是把它当成一条完整成功的答复。
+	if sentAny(res) {
+		d.log.Warn("reply partially delivered, remaining bubbles dropped",
+			"component", "sender", "sent", len(res.MessageIDs), "segments", res.Segments,
+			"conversation", in.GroupOpenID)
+		return res, fmt.Errorf("partial delivery (%d/%d bubbles): %w", len(res.MessageIDs), res.Segments, err)
 	}
 	if !errors.Is(err, qq.ErrPassiveWindowClosed) || forceActive {
 		return res, err
@@ -95,6 +124,13 @@ func (d *Dispatcher) deliver(ctx context.Context, in *Inbound, s settings.Settin
 		return activeRes, fmt.Errorf("passive reply expired and active fallback failed: %w", activeErr)
 	}
 	return activeRes, nil
+}
+
+// sentAny reports whether a SendResult already delivered at least one platform
+// message. A duplicate suppressed by the platform counts as delivered (its id is
+// empty), which is why the length is what matters, not a non-empty id.
+func sentAny(res *qq.SendResult) bool {
+	return res != nil && len(res.MessageIDs) > 0
 }
 
 func (d *Dispatcher) replyBusy(ctx context.Context, in *Inbound) {

@@ -61,6 +61,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '自主加入' },
       },
       {
+        path: 'expressions',
+        name: 'expressions',
+        component: () => import('@/pages/ExpressionsPage.vue'),
+        meta: { title: '表达方式' },
+      },
+      {
         path: 'messages',
         name: 'messages',
         component: () => import('@/pages/MessagesPage.vue'),

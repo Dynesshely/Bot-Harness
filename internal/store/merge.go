@@ -229,8 +229,8 @@ SELECT group_openid, COUNT(*) AS n
 FROM conversations
 WHERE group_openid <> ''
 GROUP BY group_openid
-HAVING n > 1
-ORDER BY n DESC
+HAVING COUNT(*) > 1
+ORDER BY COUNT(*) DESC
 LIMIT ?`, limit)
 	if err != nil {
 		return nil, err

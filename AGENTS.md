@@ -223,6 +223,28 @@ bash scripts/restore-pg.sh ~/bot-harness-backups/bot-<UTC 时间戳>            
     描述可能看错，不能当事实来源；默认提示词不推断年龄 / 性别 / 健康等敏感属性。
     改这条路径要补当前 / 引用 / 合并来源、历史标注、视觉关闭、失败降级与多模态回退测试。
 
+23. **模型错误对用户可见，但只透出脱敏摘要**（`internal/core/ai_error.go`）：
+    普通对话的模型失败兜底必须带摘要（HTTP 状态 / 上游 `error.message` / 超时 / 鉴权 /
+    限流分类），不能只说「出错了，稍后再试」。摘要统一走 `userFacingAIError`：URL 主机与路径、
+    `sk-…`、Bearer、`api_key`/`token`/`password`、`postgres://` DSN 一律替换；5xx 只透状态码；
+    截断 220 rune。完整 err 只进日志与 `LastAIError`，同时 `finishRecord` 仍记 `failed`。
+    reasoning-only 保持原有人话术（不把思维链倒给用户）；join_gate / human-status 等内部判定的
+    失败文案不在透传范围。改这条路径要补 4xx/5xx/超时/鉴权/限流/密钥与 URL 泄漏测试。
+
+24. **表达方式库只学「怎么说」，不学事实，也不替记忆**（`internal/core/expressions.go`）：
+    学习异步、每 `expression_learn_every` 轮一次，只抽 situation/style；默认进待审（disabled），
+    审核后才召回。`precise` 用 embedding 余弦粗排 + 主模型按语境选 0–inject_max 条；
+    embedding/选择失败必须退回 fast 或空，不能拖住回复（召回+选择总预算 2s）。
+    只召回本群 + 全局，默认不跨群；私聊表达不得注入群聊。注入位置固定在
+    「人设/口吻之后、记忆之前」，`expression_enabled=false` 时提示词逐字节不变。
+    改这条路径要补：学习 JSON 解析/去重/超长、fast 加权、precise 排序、失败回退、
+    跨群隔离、开关关闭零变化。
+
+25. **systemPrompt 必须带当前会话身份**（`internal/core/context.go` 的 `sessionIdentityBlock`）：
+    群聊注入 `group_openid`，私聊注入 `user_openid`；没有 id 时整块省略，不能输出空键。
+    这样管理员说「把本群的触发模式改成仅 @」时，模型能把正确的 id 交给
+    `settings_read` / `settings_write`，不必反问或猜。别把成员的私聊 OpenID 注入群聊。
+
 ## 3. 修改配置项
 
 `internal/settings` 是运行期配置的唯一入口。新增一个键的完整顺序：

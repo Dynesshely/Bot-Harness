@@ -143,6 +143,33 @@ func EstimateTokens(s string) int {
 	return cjk + (other+3)/4
 }
 
+// sessionIdentityBlock tells the model which conversation it is in. The admin
+// panel addresses groups by OpenID, so when an operator says "change this group's
+// setting" the model must be able to hand settings_write the right id instead of
+// guessing or asking for it.
+//
+// Group chats expose the group OpenID; c2c exposes the user OpenID. If neither is
+// present (a malformed event) the block is omitted rather than printing an empty
+// key.
+func sessionIdentityBlock(in *Inbound) string {
+	if in == nil {
+		return ""
+	}
+	if in.Scene == "c2c" {
+		id := firstNonEmpty(in.UserOpenID, in.MemberOpenID)
+		if id == "" {
+			return ""
+		}
+		return fmt.Sprintf("【当前会话】场景：私聊；用户 OpenID：%s。\n"+
+			"管理员让你调整本会话相关的设置时，用这个 OpenID 作为标识。", id)
+	}
+	if in.GroupOpenID == "" {
+		return ""
+	}
+	return fmt.Sprintf("【当前会话】场景：群聊；群 OpenID：%s。\n"+
+		"管理员让你调整本群（或某个群）的设置时，用这个 OpenID 作为标识。", in.GroupOpenID)
+}
+
 // BuildChatMessages assembles the model input: a system prompt plus the most
 // recent history that fits the token budget.
 func BuildChatMessages(systemPrompt string, history []store.Message, userText string, budget int) []ai.Message {

@@ -6,7 +6,14 @@ import SelectMenu from '@/components/SelectMenu.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import ToggleField from '@/components/ToggleField.vue'
 import { groupsApi, policiesApi, toMessage } from '@/api'
-import type { ContextMode, ContextScope, GroupOverride, Policies, TriggerMode } from '@/api/types'
+import type {
+  ContextMode,
+  ContextScope,
+  GroupOverride,
+  Policies,
+  QuoteReplyMode,
+  TriggerMode,
+} from '@/api/types'
 import { toast } from '@/composables/useToast'
 import {
   toGroupOverridePayload,
@@ -70,7 +77,7 @@ const draft = reactive({
   admin_openids: '',
   blocked_keywords: '',
   reply_to_bots: true,
-  quote_reply: true,
+  quote_reply_mode: 'occasionally' as QuoteReplyMode,
   group_overrides: [] as GroupOverride[],
 })
 
@@ -244,10 +251,18 @@ const REPLY_TO_BOTS_OPTIONS = [
   { value: 'false', label: '不回复 bot' },
 ]
 
+/** 按群覆盖仍写旧的布尔：true = 偶尔引用，false = 不引用。 */
 const QUOTE_REPLY_OPTIONS = [
   FOLLOW_GLOBAL,
   { value: 'true', label: '引用回复' },
   { value: 'false', label: '不引用' },
+]
+
+/** 全局引用频率分档（never / occasionally / often）。 */
+const QUOTE_REPLY_MODE_OPTIONS = [
+  { value: 'never', label: 'never · 不引用' },
+  { value: 'occasionally', label: 'occasionally · 约 30%（默认）' },
+  { value: 'often', label: 'often · 约 70%' },
 ]
 
 /** 卡片头的启用徽章：null = 跟随默认（启用），false = 该群暂停。 */
@@ -291,7 +306,8 @@ function syncFrom(data: Policies) {
   draft.admin_openids = joinList(data.admin_openids)
   draft.blocked_keywords = joinList(data.blocked_keywords)
   draft.reply_to_bots = data.reply_to_bots ?? true
-  draft.quote_reply = data.quote_reply ?? true
+  // 老后端只下发布尔：true = 偶尔引用，false = 不引用。
+  draft.quote_reply_mode = data.quote_reply_mode ?? (data.quote_reply === false ? 'never' : 'occasionally')
   draft.group_overrides = (data.group_overrides ?? []).map((item) => ({ ...item }))
 }
 
@@ -331,7 +347,11 @@ const patch = computed<Partial<Policies>>(() => {
   const keywords = parseList(draft.blocked_keywords)
   if (!sameList(keywords, source.blocked_keywords)) changed.blocked_keywords = keywords
   if (draft.reply_to_bots !== (source.reply_to_bots ?? true)) changed.reply_to_bots = draft.reply_to_bots
-  if (draft.quote_reply !== (source.quote_reply ?? true)) changed.quote_reply = draft.quote_reply
+  // 只提交新键：旧布尔由后端在保存时自动镜像，两个键同时提交会因 map 迭代顺序
+  // 产生不确定结果。
+  const sourceQuoteMode =
+    source.quote_reply_mode ?? (source.quote_reply === false ? 'never' : 'occasionally')
+  if (draft.quote_reply_mode !== sourceQuoteMode) changed.quote_reply_mode = draft.quote_reply_mode
 
   if (JSON.stringify(draft.group_overrides) !== JSON.stringify(source.group_overrides ?? [])) {
     // 透传式重建：只 trim 群号 + 可空枚举补 null，其余字段（含 D-035 的七项能力覆盖）
@@ -685,18 +705,21 @@ function setOverrideQpm(row: GroupOverride, value: string) {
           <AppIcon name="chatAlt" :size="16" class="text-sky-400" />
           引用回复
         </h2>
-        <span class="text-xs text-slate-500">默认开启</span>
+        <span class="text-xs text-slate-500">默认偶尔引用（约 30%）</span>
       </div>
       <div class="card-body space-y-3">
-        <ToggleField
-          v-model="draft.quote_reply"
-          label="回答时引用触发它的那条消息 quote_reply"
-          hint="开启后，回复会以「引用」的形式挂在触发消息下面，上下文一目了然；即时回复（占位语）始终不引用。"
+        <SelectMenu
+          id="cfg-quote-reply-mode"
+          v-model="draft.quote_reply_mode"
+          label="引用频率 quote_reply_mode"
+          :options="QUOTE_REPLY_MODE_OPTIONS"
+          hint="每条回复按概率决定是否以「引用」形式挂在触发消息下面：never 0%、occasionally 约 30%、often 约 70%。即时回复（占位语）始终不引用。"
         />
         <ul class="space-y-1 text-xs text-slate-400">
-          <li>· 这是全局默认值；每个群可以在「会话详情」里单独开关，下面的群卡片里也能改。</li>
-          <li>· 主动消息（含后台手动发送）同样支持引用。</li>
-          <li>· 升级前写入的老消息没有平台引用索引，无法被引用。</li>
+          <li>· 这是全局默认档位；每个群可以在「会话详情」里单独开关，下面的群卡片里也能改。</li>
+          <li>· 按群覆盖沿用旧的布尔语义：开 = 引用（按全局档位概率），关 = 不引用。</li>
+          <li>· 旧的 quote_reply 布尔仍可读写（true = occasionally，false = never）。</li>
+          <li>· 主动消息（含后台手动发送）同样支持引用；升级前写入的老消息没有平台引用索引，无法被引用。</li>
         </ul>
       </div>
     </section>
@@ -927,6 +950,7 @@ function setOverrideQpm(row: GroupOverride, value: string) {
                 label="引用回复 quote_reply"
                 size="sm"
                 :options="QUOTE_REPLY_OPTIONS"
+                hint="开启后按全局档位概率引用（见上方「引用频率」）"
                 @update:model-value="setOverrideBool(row, 'quote_reply', $event)"
               />
               <SelectMenu

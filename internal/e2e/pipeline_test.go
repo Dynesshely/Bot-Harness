@@ -71,7 +71,11 @@ type harness struct {
 	uploadFail bool
 	aiReply    string
 	aiFail     bool
-	aiDelay    time.Duration
+	// aiFailStatus / aiFailMessage let a test drive the user-facing error path:
+	// the fake upstream answers this HTTP status with this provider message.
+	aiFailStatus  int
+	aiFailMessage string
+	aiDelay       time.Duration
 	// aiReasoningOnly makes the fake provider imitate a reasoning model that
 	// burns its whole budget thinking and never writes a final answer.
 	aiReasoningOnly bool
@@ -88,6 +92,8 @@ type harness struct {
 	aiProactiveReply string
 	// aiExtractReply is what the fake model returns for the memory-extraction prompt.
 	aiExtractReply string
+	// aiExpressionReply is what the fake model returns for the expression-learn prompt.
+	aiExpressionReply string
 	// commitmentReply is the JSON verdict for a commitment nudge decision.
 	commitmentReply string
 	// humanStatusReply is the JSON array returned for a human-status inference.
@@ -228,6 +234,8 @@ func newHarness(t *testing.T) *harness {
 			h.lastAIBody = body
 		}
 		fail := h.aiFail
+		failStatus := h.aiFailStatus
+		failMessage := h.aiFailMessage
 		reply := h.aiReply
 		delay := h.aiDelay
 		reasoningOnly := h.aiReasoningOnly
@@ -270,8 +278,16 @@ func newHarness(t *testing.T) *harness {
 			return
 		}
 		if fail {
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"error":{"message":"boom"}}`))
+			status := failStatus
+			if status == 0 {
+				status = http.StatusInternalServerError
+			}
+			message := failMessage
+			if message == "" {
+				message = "boom"
+			}
+			w.WriteHeader(status)
+			_, _ = fmt.Fprintf(w, `{"error":{"message":%q}}`, message)
 			return
 		}
 		h.mu.Lock()
@@ -381,6 +397,17 @@ func newHarness(t *testing.T) *harness {
 					return
 				}
 			}
+		}
+		// 表达方式学习请求：只输出候选 JSON。
+		if hasSystemText(body, "表达方式的学习器") {
+			h.mu.Lock()
+			verdict := h.aiExpressionReply
+			h.mu.Unlock()
+			if verdict == "" {
+				verdict = `{"candidates":[{"situation":"有人问吃了吗","style":"刚吃完，你呢"}]}`
+			}
+			writeJSONCompletion(w, verdict)
+			return
 		}
 		// 记忆抽取请求：提示词里带「提取值得长期记住的事实」，返回 JSON 数组。
 		if msgs, ok := body["messages"].([]any); ok {
@@ -1084,8 +1111,11 @@ func TestModelFailureSendsFallbackNotice(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("expected one fallback notice, got %d", len(sent))
 	}
-	if !strings.Contains(sent[0].Body.Content, "出错") {
-		t.Fatalf("unexpected fallback text %q", sent[0].Body.Content)
+	if !strings.Contains(sent[0].Body.Content, "模型服务异常（HTTP 500）") {
+		t.Fatalf("fallback should carry the sanitized upstream status, got %q", sent[0].Body.Content)
+	}
+	if strings.Contains(sent[0].Body.Content, "boom") {
+		t.Fatalf("provider message should be summarized without raw payload: %q", sent[0].Body.Content)
 	}
 	if n := h.dis.Metrics().AIErrors.Load(); n != 1 {
 		t.Fatalf("ai error counter = %d", n)
@@ -1106,6 +1136,33 @@ func TestModelFailureSendsFallbackNotice(t *testing.T) {
 	}
 	if !sawFailed {
 		t.Fatalf("expected a failed record, got %#v", recs)
+	}
+}
+
+func TestModelErrorPassthroughIsSanitized(t *testing.T) {
+	h := newHarness(t)
+	h.mu.Lock()
+	h.aiFail = true
+	h.aiFailStatus = http.StatusBadRequest
+	h.aiFailMessage = "invalid model: demo-model; endpoint https://api.internal.example/v1"
+	h.mu.Unlock()
+
+	h.dis.HandlePayload(context.Background(), groupAtMessage("F2", "G1", "U1", "小明", "在吗"))
+
+	sent := h.waitForSent(t, 1)
+	if len(sent) != 1 {
+		t.Fatalf("expected one error notice, got %d", len(sent))
+	}
+	body := sent[0].Body.Content
+	for _, want := range []string{"模型调用失败（HTTP 400）", "invalid model"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("notice %q missing %q", body, want)
+		}
+	}
+	for _, deny := range []string{"api.internal.example", "https://"} {
+		if strings.Contains(body, deny) {
+			t.Fatalf("notice %q leaks %q", body, deny)
+		}
 	}
 }
 
@@ -2848,6 +2905,8 @@ func TestManualSendRecordsFailures(t *testing.T) {
 // @ 触发时，回复要带上被引用消息的 msg_idx（平台的 message_reference）。
 func TestQuoteReplyReferencesTheTriggeringMessage(t *testing.T) {
 	h := newHarness(t)
+	// 默认档位是 occasionally（约 30%）：pin 随机源，让断言检查引用管线而不是抽签。
+	h.dis.SetQuoteRoll(func() float64 { return 0.1 })
 	h.dis.HandlePayload(context.Background(), groupAtMessage("QQ1", "G1", "U1", "小明", "帮我看看这个"))
 
 	sent := h.waitForSent(t, 1)
@@ -2863,6 +2922,7 @@ func TestQuoteReplyReferencesTheTriggeringMessage(t *testing.T) {
 // 即时回复（「让我多想会儿」）不带引用：它是占位语，引用只会多出一个引用块。
 func TestEarlyReplyIsNotQuoted(t *testing.T) {
 	h := newHarness(t)
+	h.dis.SetQuoteRoll(func() float64 { return 0.1 })
 	h.apply(t, `{"early_reply_enabled":true,"early_reply_delay_seconds":1,"reply_footer_enabled":false}`)
 	h.mu.Lock()
 	h.aiDelay = 3 * time.Second
@@ -2884,6 +2944,7 @@ func TestEarlyReplyIsNotQuoted(t *testing.T) {
 
 func TestQuoteReplyCanBeDisabledPerGroup(t *testing.T) {
 	h := newHarness(t)
+	h.dis.SetQuoteRoll(func() float64 { return 0.1 })
 	h.apply(t, `{"group_overrides":[{"group_openid":"G1","enabled":true,"quote_reply":false}]}`)
 
 	h.dis.HandlePayload(context.Background(), groupAtMessage("QQ3", "G1", "U1", "小明", "关掉引用"))
@@ -5211,5 +5272,196 @@ func TestJoinGateContextAnnotatesQuotedWindowMessage(t *testing.T) {
 	}
 	if !strings.Contains(text, "（当前消息引用了这条）") {
 		t.Fatalf("the quoted window line is not marked:\n%s", text)
+	}
+}
+
+/* ------------------------------------------------------------------ *
+ * 群聊消息合并（debounce）：同一窗口只跑一次模型，其余消息只留痕
+ * ------------------------------------------------------------------ */
+
+// debouncePatch 打开合并窗口并把两档秒数压到测试可接受的范围。
+func debouncePatch(t *testing.T, h *harness, extra string) {
+	t.Helper()
+	raw := `{"trigger_mode":"all_messages","rate_limit_user_qpm":600,"rate_limit_group_qpm":600,` +
+		`"group_cooldown_seconds":0,"humanize_level":"off","reply_debounce_mode":"natural",` +
+		`"reply_debounce_quiet_seconds":1,"reply_debounce_active_seconds":1`
+	if extra != "" {
+		raw += "," + extra
+	}
+	h.apply(t, raw+"}")
+}
+
+// 两条未 @ 的同一窗口消息：只回一条（只跑一次模型），两条都进审计与时间线。
+func TestDebounceMergesUnaddressedMessagesIntoOneReply(t *testing.T) {
+	h := newHarness(t)
+	debouncePatch(t, h, "")
+
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("DB1", "G1", "U1", "小明", "我有个想法"))
+	time.Sleep(80 * time.Millisecond)
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("DB2", "G1", "U1", "小明", "补充一下"))
+
+	sent := h.waitForSent(t, 1)
+	if len(sent) != 1 {
+		t.Fatalf("同一窗口的两条消息应合并为一次回复，实际 %d 条", len(sent))
+	}
+	// leader 的被动回复目标必须是批次的第一条消息。
+	if sent[0].Body.MsgID != "DB1" {
+		t.Fatalf("回复应挂在 leader 上，msg_id=%q", sent[0].Body.MsgID)
+	}
+	// 再等一会儿，确认被合并的消息没有各自触发第二次模型调用。
+	time.Sleep(400 * time.Millisecond)
+	if got := len(h.sentMessages()); got != 1 {
+		t.Fatalf("被合并的消息不应各自回复，实际 %d 条", got)
+	}
+	if got := h.dis.Metrics().ReplyDebouncedBatches.Load(); got != 1 {
+		t.Fatalf("debounce batches = %d, want 1", got)
+	}
+	if got := h.dis.Metrics().ReplyDebouncedMessages.Load(); got != 1 {
+		t.Fatalf("debounce folded messages = %d, want 1", got)
+	}
+
+	// 每条消息都必须有一条审计记录：leader 已回复，folded 的那条 ignored 且
+	// reason 指向 leader 的 msg_id。
+	recs, _, err := h.st.ListRecords(context.Background(), store.RecordFilter{Direction: "in", Page: 1, PageSize: 50})
+	if err != nil {
+		t.Fatalf("records: %v", err)
+	}
+	byMsg := map[string]store.Record{}
+	for _, r := range recs {
+		byMsg[r.MsgID] = r
+	}
+	leaderRec, ok := byMsg["DB1"]
+	if !ok {
+		t.Fatalf("leader 缺少审计记录：%#v", recs)
+	}
+	if leaderRec.Status != "replied" {
+		t.Fatalf("leader 状态应为 replied，实际 %q（%s）", leaderRec.Status, leaderRec.Error)
+	}
+	folded, ok := byMsg["DB2"]
+	if !ok {
+		t.Fatalf("被合并的消息缺少审计记录：%#v", recs)
+	}
+	if folded.Status != "ignored" {
+		t.Fatalf("被合并的消息应为 ignored，实际 %q", folded.Status)
+	}
+	if !strings.Contains(folded.Error, "debounced into DB1") {
+		t.Fatalf("审计原因应指向 leader 的 msg_id，实际 %q", folded.Error)
+	}
+
+	// 两条消息都出现在会话时间线里（folded 的是观察消息）。
+	convID := core.EncodeConversationID("group:G1:U1")
+	timeline, err := h.st.Messages(context.Background(), convID, 50, 0)
+	if err != nil {
+		t.Fatalf("timeline: %v", err)
+	}
+	var seen []string
+	for _, m := range timeline {
+		seen = append(seen, m.Content)
+	}
+	joined := strings.Join(seen, "|")
+	if !strings.Contains(joined, "我有个想法") || !strings.Contains(joined, "补充一下") {
+		t.Fatalf("两条消息都应出现在时间线里，实际 %#v", seen)
+	}
+}
+
+// @ 消息绕过窗口：即使合并档位是 steady 也立即回复。
+func TestDebounceAtMessageBypassesTheWindow(t *testing.T) {
+	h := newHarness(t)
+	h.apply(t, `{"humanize_level":"off","reply_debounce_mode":"steady",`+
+		`"reply_debounce_active_seconds":7,"reply_debounce_quiet_seconds":7}`)
+
+	started := time.Now()
+	h.dis.HandlePayload(context.Background(), groupAtMessage("DBAT", "G1", "U1", "小明", "在吗"))
+	sent := h.waitForSent(t, 1)
+	if len(sent) != 1 {
+		t.Fatalf("@ 消息应立即回复，实际 %d 条", len(sent))
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("@ 消息被合并窗口拖慢了：%v", elapsed)
+	}
+	if got := h.dis.Metrics().ReplyDebouncedBatches.Load(); got != 0 {
+		t.Fatalf("@ 消息不应创建批次，batches=%d", got)
+	}
+}
+
+// off 模式逐条处理：与旧行为一致，三条消息就是三次回复。
+func TestDebounceOffKeepsTheOldPerMessageBehaviour(t *testing.T) {
+	h := newHarness(t)
+	debouncePatch(t, h, `"reply_debounce_mode":"off"`)
+
+	for i := 0; i < 3; i++ {
+		h.dis.HandlePayload(context.Background(),
+			groupAnyMessage("DBO"+strconv.Itoa(i), "G1", "U1", "小明", "逐条"+strconv.Itoa(i)))
+	}
+	sent := h.waitForSent(t, 3)
+	if len(sent) != 3 {
+		t.Fatalf("off 模式应逐条回复 3 条，实际 %d 条", len(sent))
+	}
+	if got := h.dis.Metrics().ReplyDebouncedBatches.Load(); got != 0 {
+		t.Fatalf("off 模式不应创建批次，batches=%d", got)
+	}
+	if got := h.dis.Metrics().ReplyDebouncedMessages.Load(); got != 0 {
+		t.Fatalf("off 模式不应折叠任何消息，folded=%d", got)
+	}
+}
+
+// 三条连续到达：窗口按最后一条重算，但仍然只回一次；批次里只有 leader 跑模型。
+func TestDebounceWindowResetsOnEachNewMessage(t *testing.T) {
+	h := newHarness(t)
+	debouncePatch(t, h, "")
+
+	for i := 0; i < 3; i++ {
+		h.dis.HandlePayload(context.Background(),
+			groupAnyMessage("DBR"+strconv.Itoa(i), "G1", "U1", "小明", "第"+strconv.Itoa(i)+"句"))
+		time.Sleep(60 * time.Millisecond)
+	}
+	sent := h.waitForSent(t, 1)
+	if len(sent) != 1 {
+		t.Fatalf("三条消息应合并为一次回复，实际 %d 条", len(sent))
+	}
+	time.Sleep(400 * time.Millisecond)
+	if got := len(h.sentMessages()); got != 1 {
+		t.Fatalf("合并窗口内不应产生额外回复，实际 %d 条", got)
+	}
+	if got := h.dis.Metrics().ReplyDebouncedBatches.Load(); got != 1 {
+		t.Fatalf("debounce batches = %d, want 1", got)
+	}
+	if got := h.dis.Metrics().ReplyDebouncedMessages.Load(); got != 2 {
+		t.Fatalf("debounce folded messages = %d, want 2", got)
+	}
+	if sent[0].Body.MsgID != "DBR0" {
+		t.Fatalf("回复应挂在批次 leader 上，msg_id=%q", sent[0].Body.MsgID)
+	}
+}
+
+// ctx 取消（进程退出）不能让等待中的批次 panic，也不能悄悄吞掉审计记录。
+func TestDebounceCancelledContextDoesNotPanic(t *testing.T) {
+	h := newHarness(t)
+	debouncePatch(t, h, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	h.dis.Start(ctx)
+
+	h.dis.HandlePayload(ctx, groupAnyMessage("DBC1", "G1", "U1", "小明", "还没说完"))
+	time.Sleep(80 * time.Millisecond)
+	cancel()
+	// 取消后 dispatcher 不应 panic；这条消息的审计必须收敛成一条有解释的记录。
+	time.Sleep(300 * time.Millisecond)
+
+	recs, _, err := h.st.ListRecords(context.Background(), store.RecordFilter{Direction: "in", Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("records: %v", err)
+	}
+	var found *store.Record
+	for i := range recs {
+		if recs[i].MsgID == "DBC1" {
+			found = &recs[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("被取消的消息仍必须有审计记录：%#v", recs)
+	}
+	if found.Status != "ignored" || !strings.Contains(found.Error, "debounce cancelled") {
+		t.Fatalf("取消应记为 ignored/debounce cancelled，实际 %q/%q", found.Status, found.Error)
 	}
 }

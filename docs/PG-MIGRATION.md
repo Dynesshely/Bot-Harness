@@ -6,7 +6,7 @@
 > 运行时的 PostgreSQL 方言（`internal/store/dialect.go` + `pg.go` 的 `pgSchema`）**已经实现**，
 > 两边建出来的表在列/类型/可空/默认/identity/索引/**UNIQUE 约束名**上完全等价（见 §5）。
 > 决策与代价记在 [DECISIONS.md](DECISIONS.md) 的 **D-039**（时间列另见 **D-040**）；日常切换步骤见
-> [README §1.1](../README.md) 与 [AGENTS.md §1](../AGENTS.md)。
+> [README「快速开始」](../README.md#快速开始) 与 [AGENTS.md §1](../AGENTS.md)。
 >
 > **§8 的实测数据来自一次演练（快照副本 + 临时库），§8.1 是一次生产切换的验收记录。**
 >

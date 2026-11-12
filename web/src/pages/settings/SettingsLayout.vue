@@ -273,6 +273,29 @@ function openTestAi() {
   aiResult.value = null
 }
 
+/** 子页只能通过动作改这些 ref：直接赋值会被编译器当成 `.value =`。 */
+function openPrompt() {
+  promptOpen.value = true
+}
+function closePrompt() {
+  promptOpen.value = false
+}
+function toggleCustomModel() {
+  customModel.value = !customModel.value
+}
+function toggleModelParams() {
+  modelParamsOpen.value = !modelParamsOpen.value
+}
+function closeTestAi() {
+  aiOpen.value = false
+}
+function openResetConfig() {
+  resetConfigOpen.value = true
+}
+function cancelResetConfig() {
+  resetConfigOpen.value = false
+}
+
 /* 测试发送消息 */
 const sendGroup = ref('')
 const sendContent = ref('这是一条来自管理后台的测试消息。')
@@ -316,18 +339,24 @@ async function onLogout() {
   }
 }
 
-// 子页面共用这一份状态：ref 放进 reactive 容器后读取时自动解包。
-provideConfig(
-  reactive({
-    draft, loaded, config: config as unknown as ConfigContext['config'], error, loading, saving,
-    dirty, validationError, restartRequired, apiKeySource, readonlyEntries, modelIds, modelsBaseUrl, modelsFetchedAt,
-    modelsLoading, modelsError, customModel, modelMissingFromList, promptOpen, modelParamsOpen,
-    modelParamsDirtyCount, actionLoading, resetConfigOpen, aiOpen, aiPrompt, aiRunning, aiResult,
-    aiError, sendGroup, sendContent, sending, sendResult, sendError, loggingOut,
-    save, discard, reload: load, clearStoredKey, loadModels, runAction, openTestAi, runTestAi,
-    runTestSend, onLogout,
-  }) as unknown as ConfigContext,
-)
+// 子页面共用这一份状态。
+//
+// **必须提供 ref 本身，不能套 reactive 再解构**：reactive 会把 ref 解包成普通值，
+// 子页 `const { promptOpen } = useConfig()` 拿到的就是那一刻的 boolean 快照，
+// 之后布局改 ref 子页不会重渲染（弹窗打不开），模板里再赋值还会被编译成
+// `promptOpen.value = true` → `Cannot create property 'value' on boolean 'false'`。
+// 模板读取 ref 会自动解包；子页脚本里需要 `.value` 的地方已就地处理。
+provideConfig({
+  draft, loaded, config, error, loading, saving,
+  dirty, validationError, restartRequired, apiKeySource, readonlyEntries, modelIds, modelsBaseUrl, modelsFetchedAt,
+  modelsLoading, modelsError, customModel, modelMissingFromList, promptOpen, modelParamsOpen,
+  modelParamsDirtyCount, actionLoading, resetConfigOpen, aiOpen, aiPrompt, aiRunning, aiResult,
+  aiError, sendGroup, sendContent, sending, sendResult, sendError, loggingOut,
+  openPrompt, closePrompt, toggleCustomModel, toggleModelParams, closeTestAi,
+  openResetConfig, cancelResetConfig,
+  save, discard, reload: load, clearStoredKey, loadModels, runAction, openTestAi, runTestAi,
+  runTestSend, onLogout,
+} as unknown as ConfigContext)
 
 /** 设置页的子页面（嵌套路由）。 */
 const SECTIONS = [

@@ -32,6 +32,40 @@ const (
 	ContextShared    = "shared"     // C2: one shared context per group
 )
 
+// Quote reply modes. Quoting every answer felt mechanical, so the default is a
+// probability band (MaiBot's 引用频率分档): 0% / ~30% / ~70%.
+const (
+	QuoteReplyNever        = "never"        // 0%
+	QuoteReplyOccasionally = "occasionally" // ~30% (default)
+	QuoteReplyOften        = "often"        // ~70%
+)
+
+// QuoteReplyRate maps a mode to the probability of quoting one answer. An
+// unknown or empty mode falls back to the default band.
+func QuoteReplyRate(mode string) float64 {
+	switch mode {
+	case QuoteReplyNever:
+		return 0
+	case QuoteReplyOften:
+		return 0.70
+	case QuoteReplyOccasionally, "":
+		return 0.30
+	default:
+		return 0.30
+	}
+}
+
+// Reply style variant bounds: one bad admin entry must not be able to flood the
+// system prompt or inject a paragraph.
+const (
+	ReplyStyleVariantMaxItems = 8
+	ReplyStyleVariantMaxRunes = 200
+)
+
+// ReplyStyleVariantProbabilityDefault is the default chance of applying one of
+// the configured style variants to a turn (~one in four answers).
+const ReplyStyleVariantProbabilityDefault = 0.25
+
 // Context scopes: how much of the group the model gets to read.
 //
 // This is deliberately separate from the trigger mode. "Only answer when @-ed"
@@ -100,15 +134,26 @@ type Settings struct {
 	ContextMaxTurns       int `json:"context_max_turns"`
 	// ContextMaxTokens 是喂给模型的历史 token 预算（实际预算 = 该值 − MaxTokens）。
 	// 默认 256000 面向长上下文模型；校验上限 10000000 是预留值，远大于当前模型窗口。
-	ContextMaxTokens    int    `json:"context_max_tokens"`
-	HistoryTTLHours     int    `json:"history_ttl_hours"`
-	ReplyMaxChars       int    `json:"reply_max_chars"`
-	ReplyMaxSegments    int    `json:"reply_max_segments"`
-	EarlyReplyEnabled   bool   `json:"early_reply_enabled"`
-	EarlyReplyDelaySecs int    `json:"early_reply_delay_seconds"`
-	EarlyReplyText      string `json:"early_reply_text"`
-	ReplyFooterEnabled  bool   `json:"reply_footer_enabled"`
-	EarlyReplyRecall    bool   `json:"early_reply_recall"`
+	ContextMaxTokens int `json:"context_max_tokens"`
+	HistoryTTLHours  int `json:"history_ttl_hours"`
+	ReplyMaxChars    int `json:"reply_max_chars"`
+	ReplyMaxSegments int `json:"reply_max_segments"`
+	// ReplyDebounceMode merges consecutive un-@ group messages into one turn:
+	// off / fast / natural / steady (default natural). It is pure expression:
+	// @ / quoting the bot / commands never wait, and the merged messages keep
+	// their timeline rows plus one audit record each.
+	ReplyDebounceMode string `json:"reply_debounce_mode"`
+	// ReplyDebounceQuietSeconds / ReplyDebounceActiveSeconds are the wait windows
+	// for a quiet / busy group (0–15). natural uses these numbers directly; fast
+	// is fixed at 1/3 and steady at 4/7. A group counts as active once it has seen
+	// >= 3 human messages in the last 60 seconds. Zero means "do not wait".
+	ReplyDebounceQuietSeconds  int    `json:"reply_debounce_quiet_seconds"`
+	ReplyDebounceActiveSeconds int    `json:"reply_debounce_active_seconds"`
+	EarlyReplyEnabled          bool   `json:"early_reply_enabled"`
+	EarlyReplyDelaySecs        int    `json:"early_reply_delay_seconds"`
+	EarlyReplyText             string `json:"early_reply_text"`
+	ReplyFooterEnabled         bool   `json:"reply_footer_enabled"`
+	EarlyReplyRecall           bool   `json:"early_reply_recall"`
 	// ToolsEnabled lets the model call functions. Off = plain chat, no tool loop.
 	ToolsEnabled bool `json:"tools_enabled"`
 	// ToolsMaxSteps caps model turns inside one reply (each turn may run tools).
@@ -227,6 +272,35 @@ type Settings struct {
 	JoinGateTopicDormantMinutes int `json:"join_gate_topic_dormant_minutes"`
 	JoinGateTopicClosedMinutes  int `json:"join_gate_topic_closed_minutes"`
 
+	// --- 表达方式库（expression）---
+	//
+	// 默认关闭；关闭时回复管线与没有这个库时完全一致。开启后，模型可以按
+	// 「情境 → 说法」的语料学习本群的表达习惯，并在生成前召回几条参考。
+	// 全局开关是总开关：关掉后学习、召回、注入都不发生。
+	ExpressionEnabled bool `json:"expression_enabled"`
+	// ExpressionMode picks the retrieval strategy: off / fast / precise.
+	// fast = 关键词匹配（零额外调用、零依赖）；precise = 向量召回（需要
+	// Embedding 模型，或在 expression_embedding_model 留空时复用主模型）。
+	ExpressionMode string `json:"expression_mode"`
+	// ExpressionEmbeddingModel is the embedding model used by precise mode;
+	// empty means "reuse the main model endpoint's embedding model".
+	ExpressionEmbeddingModel string `json:"expression_embedding_model"`
+	// ExpressionRecallLimit caps how many candidates one recall may return (4-50).
+	ExpressionRecallLimit int `json:"expression_recall_limit"`
+	// ExpressionInjectMax caps how many expressions reach the prompt (1-5).
+	ExpressionInjectMax int `json:"expression_inject_max"`
+	// ExpressionLearnEnabled turns on learning new expressions from finished
+	// turns. It has no effect while ExpressionEnabled is false.
+	ExpressionLearnEnabled bool `json:"expression_learn_enabled"`
+	// ExpressionLearnEvery learns once per N finished turns (1-100).
+	ExpressionLearnEvery int `json:"expression_learn_every"`
+	// ExpressionReviewEnabled queues learned expressions for review instead of
+	// enabling them immediately. Turn it off to publish straight away.
+	ExpressionReviewEnabled bool `json:"expression_review_enabled"`
+	// ExpressionShareGlobal lets expressions learned in one group be recalled in
+	// other groups too. Off keeps every expression scoped to its own group.
+	ExpressionShareGlobal bool `json:"expression_share_global"`
+
 	// --- 接入与运维（原先只存在于 .env）---
 
 	// QQAppID / QQAppSecret 是开放平台凭证。Secret 只进不出。
@@ -264,6 +338,15 @@ type Settings struct {
 	HumanizeLevel string `json:"humanize_level"`
 	// HumanizeDelayScale multiplies every pause (0.5–3, default 1).
 	HumanizeDelayScale float64 `json:"humanize_delay_scale"`
+	// HumanizeSegmentSplit controls probabilistically splitting one answer into
+	// several short bubbles: off / soft / medium / strong (off = one message).
+	HumanizeSegmentSplit string `json:"humanize_segment_split"`
+	// HumanizeTypingSecondsPerChar is the simulated typing time per character
+	// before each bubble (0.05–1.0; Chinese/English are weighted inside).
+	HumanizeTypingSecondsPerChar float64 `json:"humanize_typing_seconds_per_char"`
+	// HumanizeTypingMaxSeconds caps the extra wait a whole turn may spend on
+	// simulated typing (0–30; 0 = no cap but segment waits still apply).
+	HumanizeTypingMaxSeconds int `json:"humanize_typing_max_seconds"`
 	// Persona is one line of character description appended to the prompt.
 	Persona string `json:"persona"`
 
@@ -308,9 +391,23 @@ type Settings struct {
 	// chatter is never answered, regardless of this flag, to avoid two bots
 	// ping-ponging forever.
 	ReplyToBots bool `json:"reply_to_bots"`
-	// QuoteReply answers as a quoted reply to the triggering message. Groups can
-	// override it (see GroupOverride.QuoteReply); this is the default.
+	// QuoteReply is the legacy boolean form of QuoteReplyMode, kept for
+	// compatibility (old databases, old admin clients, per-group overrides):
+	// reading maps true → occasionally, false → never. New writes should use
+	// QuoteReplyMode; the two are mirrored on every save.
 	QuoteReply bool `json:"quote_reply"`
+	// QuoteReplyMode decides how often an answer quotes the triggering message:
+	// never / occasionally / often. Groups may still override it with the legacy
+	// boolean (GroupOverride.QuoteReply: true → occasionally, false → never);
+	// the more restrictive "never" always wins over the global band.
+	QuoteReplyMode string `json:"quote_reply_mode"`
+	// ReplyStyleVariants holds optional one-line speaking styles ("用 1–2 个字回复",
+	// "带一点翻译腔"). Empty = the feature is off. At most one entry is appended
+	// to the system prompt per turn, after persona/humanize and before memory.
+	ReplyStyleVariants []string `json:"reply_style_variants"`
+	// ReplyStyleVariantProbability is the chance (0–1) that a turn applies one of
+	// ReplyStyleVariants.
+	ReplyStyleVariantProbability float64 `json:"reply_style_variant_probability"`
 	// VisionEnabled lets the model see images attached to the current message.
 	VisionEnabled bool `json:"vision_enabled"`
 	// VisionMaxImages caps how many images one turn may carry.
@@ -375,6 +472,9 @@ func Defaults() Settings {
 		HistoryTTLHours:             72,
 		ReplyMaxChars:               1200,
 		ReplyMaxSegments:            3,
+		ReplyDebounceMode:           "natural",
+		ReplyDebounceQuietSeconds:   2,
+		ReplyDebounceActiveSeconds:  5,
 		EarlyReplyEnabled:           true,
 		EarlyReplyDelaySecs:         3,
 		EarlyReplyText:              DefaultEarlyReplyText,
@@ -420,44 +520,61 @@ func Defaults() Settings {
 		// 话题寿命兜底：20 分钟没新消息算「暂歇」，180 分钟算「已结束」。
 		JoinGateTopicDormantMinutes: orInt(0, 20, 5, 240),
 		JoinGateTopicClosedMinutes:  orInt(0, 180, 30, 1440),
-		QQTransport:                 "websocket",
-		QQIntents:                   DefaultIntents,
-		QQShardCount:                1,
-		QQWebhookPath:               "/qq/webhook",
+		// 表达方式库默认关：框架在，但不改变任何现有部署的回复行为。
+		// 学习默认开（总开关关时不生效），审核默认开（学习结果先进待审）。
+		ExpressionEnabled:        false,
+		ExpressionMode:           "fast",
+		ExpressionEmbeddingModel: "",
+		ExpressionRecallLimit:    orInt(0, 12, 4, 50),
+		ExpressionInjectMax:      orInt(0, 3, 1, 5),
+		ExpressionLearnEnabled:   true,
+		ExpressionLearnEvery:     orInt(0, 20, 1, 100),
+		ExpressionReviewEnabled:  true,
+		ExpressionShareGlobal:    false,
+		QQTransport:              "websocket",
+		QQIntents:                DefaultIntents,
+		QQShardCount:             1,
+		QQWebhookPath:            "/qq/webhook",
 		// Loopback by default: the admin panel is a privileged surface, so a
 		// fresh install must not expose it on every interface. Operators who
 		// put it behind a reverse proxy set 0.0.0.0:8080 explicitly (the
 		// process logs a WARN when the bound address is not loopback).
-		HTTPAddr:             "127.0.0.1:8080",
-		LogLevel:             "info",
-		LogBufferSize:        5000,
-		MediaMaxBytes:        4 << 20,
-		HumanizeLevel:        "medium",
-		HumanizeDelayScale:   orFloat(0, 1, 0.5, 3),
-		PolishEnabled:        true,
-		PolishModel:          "",
-		PolishTemperature:    0.7,
-		PolishMaxTokens:      0,
-		PolishTimeoutSeconds: 20,
-		PolishMinChars:       0,
-		WebEnabled:           true,
-		ExecTimeoutSeconds:   orInt(0, 15, 3, 60),
-		ExecMaxOutputBytes:   orInt(0, 8192, 512, 65536),
-		MemoryEnabled:        true,
-		MemoryInjectMax:      orInt(0, 6, 1, 20),
-		MemoryMaxPerScope:    orInt(0, 300, 20, 5000),
-		MemoryExtractEvery:   orInt(0, 10, 1, 50),
-		MarkdownEnabled:      true,
-		ReplyFooterEnabled:   true,
-		EarlyReplyRecall:     true,
-		ReplyToBots:          true,
-		QuoteReply:           true,
-		VisionEnabled:        true,
-		VisionMaxImages:      2,
-		RateLimitUserQPM:     6,
-		RateLimitGroupQPM:    20,
-		GroupCooldownSeconds: 3,
-		MaxConcurrentLLM:     4,
+		HTTPAddr:                     "127.0.0.1:8080",
+		LogLevel:                     "info",
+		LogBufferSize:                5000,
+		MediaMaxBytes:                4 << 20,
+		HumanizeLevel:                "medium",
+		HumanizeDelayScale:           orFloat(0, 1, 0.5, 3),
+		HumanizeSegmentSplit:         "medium",
+		HumanizeTypingSecondsPerChar: orFloat(0, 0.3, 0.05, 1),
+		HumanizeTypingMaxSeconds:     12,
+		PolishEnabled:                true,
+		PolishModel:                  "",
+		PolishTemperature:            0.7,
+		PolishMaxTokens:              0,
+		PolishTimeoutSeconds:         20,
+		PolishMinChars:               0,
+		WebEnabled:                   true,
+		ExecTimeoutSeconds:           orInt(0, 15, 3, 60),
+		ExecMaxOutputBytes:           orInt(0, 8192, 512, 65536),
+		MemoryEnabled:                true,
+		MemoryInjectMax:              orInt(0, 6, 1, 20),
+		MemoryMaxPerScope:            orInt(0, 300, 20, 5000),
+		MemoryExtractEvery:           orInt(0, 10, 1, 50),
+		MarkdownEnabled:              true,
+		ReplyFooterEnabled:           true,
+		EarlyReplyRecall:             true,
+		ReplyToBots:                  true,
+		QuoteReply:                   true,
+		QuoteReplyMode:               QuoteReplyOccasionally,
+		ReplyStyleVariants:           []string{},
+		ReplyStyleVariantProbability: ReplyStyleVariantProbabilityDefault,
+		VisionEnabled:                true,
+		VisionMaxImages:              2,
+		RateLimitUserQPM:             6,
+		RateLimitGroupQPM:            20,
+		GroupCooldownSeconds:         3,
+		MaxConcurrentLLM:             4,
 
 		// Manual sending is a runtime setting (no .env knob): the panel has to be
 		// able to turn it off without a redeploy.
@@ -520,7 +637,13 @@ func New(ctx context.Context, st *store.Store, base Settings) (*Manager, error) 
 		if err != nil {
 			return nil, fmt.Errorf("settings: load overrides: %w", err)
 		}
+		// quote_reply 是 quote_reply_mode 的旧布尔视图；两者都落库时以新键为准，
+		// 否则 map 迭代顺序会让 legacy 布尔把档位覆盖回 occasionally / never。
+		_, hasQuoteMode := saved["quote_reply_mode"]
 		for k, v := range saved {
+			if k == "quote_reply" && hasQuoteMode {
+				continue
+			}
 			// A stale, hand-edited or now-forbidden override must never brick
 			// startup: skip the offending key and keep the rest.
 			candidate := current
@@ -578,9 +701,17 @@ func (m *Manager) Apply(ctx context.Context, patch map[string]json.RawMessage) (
 	}
 	next := m.Get()
 	changed := map[string]json.RawMessage{}
+	// 同一个补丁里同时出现新旧引用键时，新键优先：否则 map 迭代顺序会决定
+	// 到底按档位还是按旧布尔生效（两条路径都会镜像对方，结果因此不确定）。
+	_, patchHasQuoteMode := patch["quote_reply_mode"]
 	for k, raw := range patch {
 		if !known[k] {
 			return Settings{}, nil, fmt.Errorf("unknown or read-only field %q", k)
+		}
+		if k == "quote_reply" && patchHasQuoteMode {
+			// 仍然把（由档位镜像出来的）布尔落库，让只读旧键的程序看到一致值。
+			changed[k] = raw
+			continue
 		}
 		if err := applyKey(&next, k, raw); err != nil {
 			return Settings{}, nil, fmt.Errorf("field %q: %w", k, err)
@@ -884,6 +1015,20 @@ func validateRanges(s *Settings) error {
 		// 否则 closed 会在 dormant 之前触发，两个档位就失去意义。
 		problems = append(problems, "join_gate_topic_closed_minutes must be greater than join_gate_topic_dormant_minutes")
 	}
+	switch s.ExpressionMode {
+	case "", "off", "fast", "precise":
+	default:
+		problems = append(problems, "expression_mode must be off/fast/precise")
+	}
+	if s.ExpressionRecallLimit < 4 || s.ExpressionRecallLimit > 50 {
+		problems = append(problems, "expression_recall_limit must be within [4, 50]")
+	}
+	if s.ExpressionInjectMax < 1 || s.ExpressionInjectMax > 5 {
+		problems = append(problems, "expression_inject_max must be within [1, 5]")
+	}
+	if s.ExpressionLearnEvery < 1 || s.ExpressionLearnEvery > 100 {
+		problems = append(problems, "expression_learn_every must be within [1, 100]")
+	}
 	switch s.HumanizeLevel {
 	case "", "off", "soft", "medium", "strong":
 	default:
@@ -891,6 +1036,46 @@ func validateRanges(s *Settings) error {
 	}
 	if s.HumanizeDelayScale < 0.5 || s.HumanizeDelayScale > 3 {
 		problems = append(problems, "humanize_delay_scale must be within [0.5, 3]")
+	}
+	switch s.HumanizeSegmentSplit {
+	case "", "off", "soft", "medium", "strong":
+	default:
+		problems = append(problems, "humanize_segment_split must be off/soft/medium/strong")
+	}
+	if s.HumanizeTypingSecondsPerChar < 0.05 || s.HumanizeTypingSecondsPerChar > 1 {
+		problems = append(problems, "humanize_typing_seconds_per_char must be within [0.05, 1]")
+	}
+	if s.HumanizeTypingMaxSeconds < 0 || s.HumanizeTypingMaxSeconds > 30 {
+		problems = append(problems, "humanize_typing_max_seconds must be within [0, 30]")
+	}
+	switch s.ReplyDebounceMode {
+	case "", "off", "fast", "natural", "steady":
+	default:
+		problems = append(problems, "reply_debounce_mode must be off/fast/natural/steady")
+	}
+	if s.ReplyDebounceQuietSeconds < 0 || s.ReplyDebounceQuietSeconds > 15 {
+		problems = append(problems, "reply_debounce_quiet_seconds must be within [0, 15]")
+	}
+	if s.ReplyDebounceActiveSeconds < 0 || s.ReplyDebounceActiveSeconds > 15 {
+		problems = append(problems, "reply_debounce_active_seconds must be within [0, 15]")
+	}
+	switch s.QuoteReplyMode {
+	case "", QuoteReplyNever, QuoteReplyOccasionally, QuoteReplyOften:
+	default:
+		problems = append(problems, "quote_reply_mode must be never/occasionally/often")
+	}
+	if len(s.ReplyStyleVariants) > ReplyStyleVariantMaxItems {
+		problems = append(problems, fmt.Sprintf(
+			"reply_style_variants must have at most %d entries", ReplyStyleVariantMaxItems))
+	}
+	for i, variant := range s.ReplyStyleVariants {
+		if n := len([]rune(variant)); n > ReplyStyleVariantMaxRunes {
+			problems = append(problems, fmt.Sprintf(
+				"reply_style_variants[%d] must be at most %d characters", i, ReplyStyleVariantMaxRunes))
+		}
+	}
+	if s.ReplyStyleVariantProbability < 0 || s.ReplyStyleVariantProbability > 1 {
+		problems = append(problems, "reply_style_variant_probability must be within [0, 1]")
 	}
 	if s.PolishTemperature < 0 || s.PolishTemperature > 2 {
 		problems = append(problems, "polish_temperature must be within [0, 2]")
@@ -1026,6 +1211,7 @@ func (m *Manager) GroupConfig(groupOpenID string) GroupConfig {
 		ContextScope:     s.ContextScope,
 		ReplyToBots:      s.ReplyToBots,
 		QuoteReply:       s.QuoteReply,
+		QuoteReplyMode:   s.QuoteReplyMode,
 		ToolsEnabled:     s.ToolsEnabled,
 		MemoryEnabled:    s.MemoryEnabled,
 		WebEnabled:       s.WebEnabled,
@@ -1062,7 +1248,14 @@ func (m *Manager) GroupConfig(groupOpenID string) GroupConfig {
 			cfg.ReplyToBots = *ov.ReplyToBots
 		}
 		if ov.QuoteReply != nil {
-			cfg.QuoteReply = *ov.QuoteReply
+			// The override is the legacy boolean (true = occasionally). It can
+			// only narrow the global band: false always means never, and a
+			// globally-disabled quote reply stays disabled for every group.
+			if !*ov.QuoteReply || s.QuoteReplyMode == QuoteReplyNever {
+				cfg.QuoteReplyMode = QuoteReplyNever
+			} else {
+				cfg.QuoteReplyMode = QuoteReplyOccasionally
+			}
 		}
 		if ov.Tools != nil {
 			cfg.ToolsEnabled = *ov.Tools
@@ -1114,21 +1307,33 @@ func (m *Manager) GroupConfig(groupOpenID string) GroupConfig {
 	if s.JoinGateMode == "off" {
 		cfg.JoinGateEnabled = false
 	}
+	// One more mirror at the end: QuoteReply is what pre-upgrade call sites read,
+	// QuoteReplyMode is the new source of truth. Normalising here keeps them in
+	// agreement no matter which branch above ran.
+	if cfg.QuoteReplyMode == "" {
+		cfg.QuoteReplyMode = QuoteReplyOccasionally
+	}
+	cfg.QuoteReply = cfg.QuoteReplyMode != QuoteReplyNever
 	return cfg
 }
 
 // GroupConfig is the resolved per-group behaviour.
 type GroupConfig struct {
-	Enabled       bool
-	TriggerMode   string
-	ContextMode   string
-	ContextScope  string
-	ReplyToBots   bool
-	QuoteReply    bool
-	ToolsEnabled  bool
-	MemoryEnabled bool
-	WebEnabled    bool
-	ExecEnabled   bool
+	Enabled      bool
+	TriggerMode  string
+	ContextMode  string
+	ContextScope string
+	ReplyToBots  bool
+	// QuoteReply is the legacy boolean view of QuoteReplyMode (false only when
+	// the resolved mode is "never"). Kept because existing call sites and the
+	// admin contract still read it.
+	QuoteReply bool
+	// QuoteReplyMode is the resolved quote frequency band for this group.
+	QuoteReplyMode string
+	ToolsEnabled   bool
+	MemoryEnabled  bool
+	WebEnabled     bool
+	ExecEnabled    bool
 	// AffectEnabled / AffectInjectMode are the resolved affect switches for this
 	// group (global defaults, overridable per group).
 	AffectEnabled    bool
@@ -1153,12 +1358,23 @@ func normalize(s *Settings) {
 	s.OpenAIAPIKey = strings.TrimSpace(s.OpenAIAPIKey)
 	s.PolishModel = strings.TrimSpace(s.PolishModel)
 	s.JoinGateModel = strings.TrimSpace(s.JoinGateModel)
+	s.ExpressionEmbeddingModel = strings.TrimSpace(s.ExpressionEmbeddingModel)
+	if s.ExpressionMode == "" {
+		// 缺省档位是 fast；off 与总开关关闭等效，但只能由显式配置给出。
+		s.ExpressionMode = "fast"
+	}
 	if s.JoinGateMode == "" {
 		// 缺省档位是 llm；off 只能由显式配置或总开关给出。
 		s.JoinGateMode = "llm"
 	}
 	if s.ContextScope == "" {
 		s.ContextScope = ContextAddressedOnly
+	}
+	if s.HumanizeSegmentSplit == "" {
+		s.HumanizeSegmentSplit = "medium"
+	}
+	if s.ReplyDebounceMode == "" {
+		s.ReplyDebounceMode = "natural"
 	}
 	if s.GroupAllowlist == nil {
 		s.GroupAllowlist = []string{}
@@ -1179,6 +1395,20 @@ func normalize(s *Settings) {
 	s.MemberAllowlist = trimList(s.MemberAllowlist)
 	s.AdminOpenIDs = trimList(s.AdminOpenIDs)
 	s.BlockedKeywords = trimList(s.BlockedKeywords)
+	s.ReplyStyleVariants = trimList(s.ReplyStyleVariants)
+	// Quote reply: two representations of one wish. An empty mode means the
+	// document predates quote_reply_mode (or only the legacy boolean was ever
+	// written), so the legacy value is the source of truth there. When the mode
+	// is set it wins, and the legacy boolean is mirrored for old readers.
+	switch s.QuoteReplyMode {
+	case QuoteReplyNever, QuoteReplyOccasionally, QuoteReplyOften:
+		s.QuoteReply = s.QuoteReplyMode != QuoteReplyNever
+	default:
+		s.QuoteReplyMode = QuoteReplyOccasionally
+		if !s.QuoteReply {
+			s.QuoteReplyMode = QuoteReplyNever
+		}
+	}
 }
 
 func trimList(in []string) []string {
@@ -1384,6 +1614,39 @@ func applyKey(dst *Settings, key string, raw json.RawMessage) error {
 		return json.Unmarshal(raw, &dst.JoinGateTopicDormantMinutes)
 	case "join_gate_topic_closed_minutes":
 		return json.Unmarshal(raw, &dst.JoinGateTopicClosedMinutes)
+	case "expression_enabled":
+		return json.Unmarshal(raw, &dst.ExpressionEnabled)
+	case "expression_mode":
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return err
+		}
+		v = strings.ToLower(strings.TrimSpace(v))
+		switch v {
+		case "off", "fast", "precise":
+			dst.ExpressionMode = v
+			return nil
+		}
+		return fmt.Errorf("expression_mode must be off/fast/precise")
+	case "expression_embedding_model":
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return err
+		}
+		dst.ExpressionEmbeddingModel = strings.TrimSpace(v)
+		return nil
+	case "expression_recall_limit":
+		return json.Unmarshal(raw, &dst.ExpressionRecallLimit)
+	case "expression_inject_max":
+		return json.Unmarshal(raw, &dst.ExpressionInjectMax)
+	case "expression_learn_enabled":
+		return json.Unmarshal(raw, &dst.ExpressionLearnEnabled)
+	case "expression_learn_every":
+		return json.Unmarshal(raw, &dst.ExpressionLearnEvery)
+	case "expression_review_enabled":
+		return json.Unmarshal(raw, &dst.ExpressionReviewEnabled)
+	case "expression_share_global":
+		return json.Unmarshal(raw, &dst.ExpressionShareGlobal)
 	case "humanize_level":
 		var level string
 		if err := json.Unmarshal(raw, &level); err != nil {
@@ -1397,6 +1660,38 @@ func applyKey(dst *Settings, key string, raw json.RawMessage) error {
 		return fmt.Errorf("humanize_level must be off/soft/medium/strong")
 	case "humanize_delay_scale":
 		return json.Unmarshal(raw, &dst.HumanizeDelayScale)
+	case "humanize_segment_split":
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return err
+		}
+		v = strings.ToLower(strings.TrimSpace(v))
+		switch v {
+		case "off", "soft", "medium", "strong":
+			dst.HumanizeSegmentSplit = v
+			return nil
+		}
+		return fmt.Errorf("humanize_segment_split must be off/soft/medium/strong")
+	case "humanize_typing_seconds_per_char":
+		return json.Unmarshal(raw, &dst.HumanizeTypingSecondsPerChar)
+	case "humanize_typing_max_seconds":
+		return json.Unmarshal(raw, &dst.HumanizeTypingMaxSeconds)
+	case "reply_debounce_mode":
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return err
+		}
+		v = strings.ToLower(strings.TrimSpace(v))
+		switch v {
+		case "off", "fast", "natural", "steady":
+			dst.ReplyDebounceMode = v
+			return nil
+		}
+		return fmt.Errorf("reply_debounce_mode must be off/fast/natural/steady")
+	case "reply_debounce_quiet_seconds":
+		return json.Unmarshal(raw, &dst.ReplyDebounceQuietSeconds)
+	case "reply_debounce_active_seconds":
+		return json.Unmarshal(raw, &dst.ReplyDebounceActiveSeconds)
 	case "polish_enabled":
 		return json.Unmarshal(raw, &dst.PolishEnabled)
 	case "polish_model":
@@ -1457,7 +1752,35 @@ func applyKey(dst *Settings, key string, raw json.RawMessage) error {
 	case "openai_api_key":
 		return json.Unmarshal(raw, &dst.OpenAIAPIKey)
 	case "quote_reply":
-		return json.Unmarshal(raw, &dst.QuoteReply)
+		// Legacy boolean: true = occasionally, false = never. Writing it also
+		// rewrites the mode, so a patch that only touches the old key still works.
+		if err := json.Unmarshal(raw, &dst.QuoteReply); err != nil {
+			return err
+		}
+		if dst.QuoteReply {
+			dst.QuoteReplyMode = QuoteReplyOccasionally
+		} else {
+			dst.QuoteReplyMode = QuoteReplyNever
+		}
+		return nil
+	case "quote_reply_mode":
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return err
+		}
+		v = strings.ToLower(strings.TrimSpace(v))
+		switch v {
+		case QuoteReplyNever, QuoteReplyOccasionally, QuoteReplyOften:
+			dst.QuoteReplyMode = v
+			// Mirror the legacy boolean for old readers and old admin clients.
+			dst.QuoteReply = v != QuoteReplyNever
+			return nil
+		}
+		return fmt.Errorf("quote_reply_mode must be never/occasionally/often")
+	case "reply_style_variants":
+		return json.Unmarshal(raw, &dst.ReplyStyleVariants)
+	case "reply_style_variant_probability":
+		return json.Unmarshal(raw, &dst.ReplyStyleVariantProbability)
 	case "reply_to_bots":
 		return json.Unmarshal(raw, &dst.ReplyToBots)
 	case "vision_enabled":

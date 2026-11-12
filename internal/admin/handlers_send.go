@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dynesshely/bot-harness/internal/core"
+	"github.com/dynesshely/bot-harness/internal/settings"
 	"github.com/dynesshely/bot-harness/internal/store"
 )
 
@@ -49,10 +51,15 @@ func (s *Server) handleSendConversationMessage(w http.ResponseWriter, r *http.Re
 // handleSetQuoteReply flips the per-group 引用回复 switch shown in the
 // conversation detail page. The override lives in the policies document, but the
 // detail page owns the control, so it gets a dedicated endpoint.
+//
+// The stored override is still the legacy boolean (true = occasionally), so the
+// body also accepts a mode: "never" clears quoting for this group, any other
+// mode turns it on. enabled keeps working unchanged.
 func (s *Server) handleSetQuoteReply(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body struct {
-		Enabled *bool `json:"enabled"`
+		Enabled *bool  `json:"enabled"`
+		Mode    string `json:"mode"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -71,17 +78,36 @@ func (s *Server) handleSetQuoteReply(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "no_group", "只有群会话能设置引用回复（私聊跟随全局默认）")
 		return
 	}
+	enabled := body.Enabled
+	if mode := strings.ToLower(strings.TrimSpace(body.Mode)); mode != "" {
+		// mode 是 enabled 的新写法：never = 关掉本群引用；其余档位 = 打开本群引用
+		// （按群覆盖只有布尔粒度，档位仍由全局 quote_reply_mode 决定）。
+		switch mode {
+		case settings.QuoteReplyNever:
+			off := false
+			enabled = &off
+		case settings.QuoteReplyOccasionally, settings.QuoteReplyOften:
+			on := true
+			enabled = &on
+		default:
+			writeError(w, http.StatusBadRequest, "invalid_request",
+				"mode must be never/occasionally/often")
+			return
+		}
+	}
 	// enabled 为空表示清掉覆盖、回到「跟随全局」。
-	if err := s.deps.Settings.SetGroupQuoteReply(ctxBg(), conv.GroupOpenID, body.Enabled); err != nil {
+	if err := s.deps.Settings.SetGroupQuoteReply(ctxBg(), conv.GroupOpenID, enabled); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	cfg := s.deps.Settings.GroupConfig(conv.GroupOpenID)
 	writeOK(w, map[string]any{
-		"group_openid": conv.GroupOpenID,
-		"quote_reply":  cfg.QuoteReply,
-		"override":     s.deps.Settings.GroupQuoteReplyOverride(conv.GroupOpenID),
-		"global":       s.deps.Settings.Get().QuoteReply,
+		"group_openid":     conv.GroupOpenID,
+		"quote_reply":      cfg.QuoteReply,
+		"quote_reply_mode": cfg.QuoteReplyMode,
+		"override":         s.deps.Settings.GroupQuoteReplyOverride(conv.GroupOpenID),
+		"global":           s.deps.Settings.Get().QuoteReply,
+		"global_mode":      s.deps.Settings.Get().QuoteReplyMode,
 	})
 }
 

@@ -68,6 +68,14 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 
 	userText := in.Content
 	systemPrompt := d.promptFor(s, cfg)
+	// 当前会话标识：管理员说「本群」时，模型需要知道实际的 OpenID。
+	if identityBlock := sessionIdentityBlock(in); identityBlock != "" {
+		systemPrompt = appendSystemBlock(systemPrompt, identityBlock)
+	}
+	// 表达方式库：只在本群范围内召回，注入位置在人设/口吻之后、记忆之前。
+	if block := d.expressionBlock(ctx, in, s, userText); block != "" {
+		systemPrompt = appendSystemBlock(systemPrompt, block)
+	}
 	if conv.Scene == SceneGroupShared {
 		userText = fmt.Sprintf("%s：%s", firstNonEmpty(in.MemberName, "群成员"), in.Content)
 		systemPrompt += "\n\n当前是群共享上下文：每条用户消息以「昵称：内容」的格式给出，你可以看到群里其他成员之前的发言。回复时直接回答最后一条消息即可，不要带昵称前缀。"
@@ -142,7 +150,7 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 		if !errors.Is(aiCtx.Err(), context.DeadlineExceeded) {
 			d.log.Warn("model call failed", "component", "ai", "error", err.Error())
 		}
-		fallback := "抱歉，我这边刚才出错了，稍后再试试～"
+		fallback := "抱歉，我这边出错了（" + userFacingAIError(err) + "）。可以稍后再试，或让管理员检查后台模型配置。"
 		if errors.Is(err, ai.ErrReasoningOnlyCompletion) {
 			// The model spent its budget thinking and never wrote an answer.
 			// Its chain of thought is never sent, so ask for a retry instead of
@@ -260,9 +268,11 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 		deliverText = appendReplyFooter(sentText, tokenCount, elapsed)
 	}
 
-	// 引用回复：只引用触发这次回答的那条消息，按群设置决定是否启用。
+	// 引用回复：只引用触发这次回答的那条消息。开关是概率分档
+	// （never / occasionally / often），按群覆盖仍走旧的布尔语义。
 	quoteIndex := ""
-	if cfg.QuoteReply {
+	// 旧布尔是可靠的关闭信号：cfg.QuoteReply=false 时连随机源都不该掷。
+	if d.shouldQuote(cfg.QuoteReplyMode, cfg.QuoteReply) {
 		quoteIndex = in.QuoteIndex
 	}
 	// 行为参数只改**本轮副本**：上限、分段、人味节奏都跟着当下的状态走，
@@ -329,6 +339,8 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	}
 	// 后台从这一轮抽取值得长期记住的事实（默认关，每 N 轮一次）。
 	d.extractMemories(conv.ID, in, cfg, s, userText, sentText)
+	// 表达方式学习同样异步、best-effort，失败不影响这一轮。
+	d.learnExpressions(ctx, conv.ID, in, s, userText, sentText)
 	d.finishRecord(rec, "replied", "", latency)
 }
 

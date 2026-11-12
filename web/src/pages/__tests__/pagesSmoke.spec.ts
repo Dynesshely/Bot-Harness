@@ -13,6 +13,7 @@ import ToolsPage from '@/pages/ToolsPage.vue'
 import LoginPage from '@/pages/LoginPage.vue'
 import AffectPage from '@/pages/AffectPage.vue'
 import JoinPage from '@/pages/JoinPage.vue'
+import ExpressionsPage from '@/pages/ExpressionsPage.vue'
 import SettingsLayout from '@/pages/settings/SettingsLayout.vue'
 
 /**
@@ -57,6 +58,7 @@ const api = vi.hoisted(() => ({
   models: { list: vi.fn() },
   toolCalls: { list: vi.fn() },
   memories: { list: vi.fn(), add: vi.fn(), remove: vi.fn(), forgetGroup: vi.fn() },
+  expressions: { list: vi.fn(), add: vi.fn(), setEnabled: vi.fn(), remove: vi.fn(), reinforce: vi.fn() },
   tasks: { list: vi.fn(), cancel: vi.fn() },
   commitments: { list: vi.fn(), cancel: vi.fn() },
   proactive: { overview: vi.fn() },
@@ -92,6 +94,7 @@ vi.mock('@/api', async (importOriginal) => {
     modelsApi: api.models,
     toolCallsApi: api.toolCalls,
     memoriesApi: api.memories,
+    expressionsApi: api.expressions,
     tasksApi: api.tasks,
     commitmentsApi: api.commitments,
     proactiveApi: api.proactive,
@@ -148,6 +151,47 @@ const policiesFixture = {
   ],
   platform: { known_groups: 0, full_access_groups: [], limited_groups: [] },
   warnings: [],
+}
+
+const expressionsFixture = {
+  total: 3,
+  page: 1,
+  page_size: 20,
+  items: [
+    {
+      id: 11,
+      group_openid: 'GROUP_A',
+      situation: '被夸的时候',
+      style: '先谦虚两句，再把话题带回正事',
+      source: 'learn',
+      enabled: true,
+      use_count: 4,
+      weight: 1,
+      created_at: '2026-07-21T10:00:00Z',
+    },
+    {
+      id: 12,
+      group_openid: '',
+      situation: '有人讲冷笑话',
+      style: '配合吐槽一句，不用解释笑点',
+      source: 'admin',
+      enabled: false,
+      use_count: 0,
+      weight: 0,
+      created_at: '2026-07-21T09:00:00Z',
+    },
+    {
+      id: 13,
+      group_openid: 'GROUP_A',
+      situation: '被问技术问题',
+      style: '先给结论，再补两句原因',
+      source: 'learn',
+      enabled: true,
+      use_count: 9,
+      weight: 2,
+      created_at: '2026-07-20T10:00:00Z',
+    },
+  ],
 }
 
 const joinDecisionsFixture = [
@@ -461,6 +505,21 @@ function resetApiMocks(): void {
   }))
   api.models.list.mockResolvedValue(modelsFixture)
   api.memories.list.mockResolvedValue([])
+  api.expressions.list.mockResolvedValue(expressionsFixture)
+  api.expressions.add.mockResolvedValue({
+    id: 14,
+    group_openid: '',
+    situation: '被问在不在',
+    style: '简短回一句在',
+    source: 'admin',
+    enabled: true,
+    use_count: 0,
+    weight: 0,
+    created_at: '2026-07-21T10:05:00Z',
+  })
+  api.expressions.setEnabled.mockImplementation(async (id: number, enabled: boolean) => ({ id, enabled }))
+  api.expressions.remove.mockImplementation(async (id: number) => ({ deleted: 1, id }))
+  api.expressions.reinforce.mockImplementation(async (id: number) => ({ id, reinforced: true }))
   api.tasks.list.mockResolvedValue([])
   api.commitments.list.mockResolvedValue(commitmentsFixture)
   api.commitments.cancel.mockResolvedValue({ canceled: true })
@@ -642,6 +701,7 @@ describe('一级页面挂载冒烟', () => {
     { label: '工具调用', component: ToolsPage, path: '/tools', anchor: '工具' },
     { label: '情绪状态', component: AffectPage, path: '/affect', anchor: '情绪状态' },
     { label: '自主加入', component: JoinPage, path: '/join', anchor: '自主加入' },
+    { label: '表达方式', component: ExpressionsPage, path: '/expressions', anchor: '表达方式' },
     { label: '登录页', component: LoginPage, path: '/login', anchor: '登录' },
   ]
 
@@ -697,6 +757,90 @@ describe('一级页面挂载冒烟', () => {
     wrapper.unmount()
   })
 
+  it('表达方式：列表 / 搜索 / 启停 / 强化 / 删除 / 新增都走对应接口', async () => {
+    const wrapper = await mountRoute(ExpressionsPage, '/expressions')
+    let text = wrapper.text()
+    // fixture 里的情境与说法都渲染出来，启用状态有中文标签
+    expect(text).toContain('被夸的时候')
+    expect(text).toContain('先谦虚两句，再把话题带回正事')
+    expect(text).toContain('有人讲冷笑话')
+    expect(text).toContain('已启用')
+    expect(text).toContain('待审 / 停用')
+    expect(api.expressions.list).toHaveBeenCalledTimes(1)
+    expect(api.expressions.list.mock.calls[0][0]).toMatchObject({ page: 1, page_size: 20 })
+
+    // 搜索框输入后重新拉列表（防抖 200ms）
+    vi.useFakeTimers()
+    await wrapper.find('#expr-q').setValue('冷笑话')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    vi.useRealTimers()
+    const lastQuery = api.expressions.list.mock.calls.at(-1)?.[0]
+    expect(lastQuery).toMatchObject({ q: '冷笑话' })
+
+    // 停用第一条（当前 enabled=true → 调 setEnabled(id, false)）
+    const toggle = wrapper.findAll('button').find((button) => button.text() === '停用')
+    expect(toggle, '找不到停用按钮').toBeTruthy()
+    await toggle?.trigger('click')
+    await flushPromises()
+    expect(api.expressions.setEnabled).toHaveBeenCalledWith(11, false)
+
+    // 强化
+    const reinforce = wrapper.findAll('button').find((button) => button.text() === '强化')
+    expect(reinforce, '找不到强化按钮').toBeTruthy()
+    await reinforce?.trigger('click')
+    await flushPromises()
+    expect(api.expressions.reinforce).toHaveBeenCalledWith(11)
+
+    // 删除：先弹确认，再调 DELETE
+    const removeButton = wrapper.findAll('button').find((button) => button.attributes('title') === '删除这条表达')
+    expect(removeButton, '找不到删除按钮').toBeTruthy()
+    await removeButton?.trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('删除表达方式')
+    const confirm = Array.from(document.querySelectorAll('button')).find(
+      (button) => (button.textContent ?? '').trim() === '删除',
+    )
+    expect(confirm, '确认弹窗里没有删除按钮').toBeTruthy()
+    confirm?.click()
+    await flushPromises()
+    expect(api.expressions.remove).toHaveBeenCalledWith(11)
+
+    // 新增：填情境 + 说法后提交
+    await wrapper.find('#expr-new-situation').setValue('被问在不在')
+    await wrapper.find('#expr-new-style').setValue('简短回一句在')
+    const addButton = wrapper.findAll('button').find((button) => button.text().includes('加入表达库'))
+    expect(addButton, '找不到新增按钮').toBeTruthy()
+    await addButton?.trigger('click')
+    await flushPromises()
+    expect(api.expressions.add).toHaveBeenCalledWith({
+      group_openid: '',
+      situation: '被问在不在',
+      style: '简短回一句在',
+    })
+    // 新增后回到第一页并重新拉取
+    expect(api.expressions.list.mock.calls.at(-1)?.[0]).toMatchObject({ page: 1 })
+
+    text = wrapper.text()
+    expect(text).toContain('表达方式')
+    expect(unexpected(consoleErrors)).toEqual([])
+    expect(unexpected(consoleWarns)).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('表达方式：新增按钮在情境或说法为空时禁用', async () => {
+    const wrapper = await mountRoute(ExpressionsPage, '/expressions')
+    const addButton = wrapper.findAll('button').find((button) => button.text().includes('加入表达库'))
+    expect(addButton?.attributes('disabled')).toBeDefined()
+    await wrapper.find('#expr-new-situation').setValue('被问在不在')
+    expect(addButton?.attributes('disabled')).toBeDefined()
+    await wrapper.find('#expr-new-style').setValue('   ')
+    expect(addButton?.attributes('disabled')).toBeDefined()
+    await wrapper.find('#expr-new-style').setValue('简短回一句在')
+    expect(addButton?.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('自主加入：未启用时显示空状态与一键启用引导', async () => {
     api.config.get.mockResolvedValue({
       ...configFixture,
@@ -729,6 +873,9 @@ describe('设置页 6 个二级页挂载冒烟', () => {
       anchors: [
         '档位 humanize_level',
         '人设 persona',
+        '引用频率 quote_reply_mode',
+        '口吻轮换 reply_style_variants',
+        'reply_style_variant_probability',
         '两阶段生成',
         '润色模型 polish_model',
         '润色温度 polish_temperature',
@@ -738,6 +885,18 @@ describe('设置页 6 个二级页挂载冒烟', () => {
         '承诺追问',
         'commitment_enabled',
         'commitment_max_open_per_member',
+        // 表达方式库：总开关 + 档位 + embedding 模型 + 召回数 + 注入上限 +
+        // 学习间隔 + 审核开关 + 全局共享，全部用标准控件。
+        '表达方式',
+        'expression_enabled',
+        '召回档位 expression_mode',
+        '向量模型 expression_embedding_model',
+        '召回条数 expression_recall_limit',
+        '注入上限 expression_inject_max',
+        '学习间隔 expression_learn_every',
+        '自动学习 expression_learn_enabled',
+        '新表达先待审 expression_review_enabled',
+        '跨群共享 expression_share_global',
       ],
     },
     {
@@ -804,9 +963,13 @@ describe('设置页 6 个二级页挂载冒烟', () => {
     const model = wrapper.find<HTMLInputElement>('input[placeholder="留空 = 使用主模型"]')
     expect(model.exists()).toBe(true)
     expect(model.element.disabled).toBe(true)
-    // 4 个数字输入（temperature / max_tokens / timeout / min_chars）一起禁用；
-    // 本页其它数字输入（人味、手动发送、提前回复）不受影响。
-    const disabledNumbers = wrapper
+    // 该区块的 4 个数字输入（temperature / max_tokens / timeout / min_chars）一起禁用；
+    // 本页其它数字输入（人味、手动发送、提前回复、表达方式）不受影响。
+    const polishSection = wrapper
+      .findAll('div.rounded-xl')
+      .find((section) => section.text().includes('两阶段生成'))
+    expect(polishSection, '找不到「两阶段生成」区块').toBeTruthy()
+    const disabledNumbers = (polishSection ?? wrapper)
       .findAll<HTMLInputElement>('input[type="number"]')
       .filter((input) => input.element.disabled)
     expect(disabledNumbers).toHaveLength(4)
@@ -873,6 +1036,68 @@ describe('设置页 6 个二级页挂载冒烟', () => {
     expect(text).toContain('同步失败')
     expect(text).toContain('平台指令面板接口返回 502')
     expect(text).not.toContain('panel_id')
+    expect(unexpected(consoleErrors)).toEqual([])
+    expect(unexpected(consoleWarns)).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('弹窗/开关按钮：模板不再给 context 布尔赋值，点击不触发 errorHandler', async () => {
+    // ModalDialog 用 Teleport；单测里把 teleport 内联，断言才能看到弹窗内容。
+    await appRouter.push('/settings/provider')
+    const wrapper = mount(SettingsLayout, {
+      attachTo: document.body,
+      global: {
+        plugins: [appRouter],
+        stubs: { AppIcon: true, CopyButton: true, StatusBadge: true },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+    // ModalDialog 的真实 Teleport 内容在 body 里，不在 wrapper.text() 中。
+    const text = () => document.body.textContent ?? ''
+    const clickButton = async (label: string) => {
+      // 弹窗内容 Teleport 到 body：优先在 wrapper 里找，再退到 document。
+      let button = wrapper.findAll('button').find((item) => item.text().includes(label))
+      if (!button) {
+        const buttons = Array.from(document.querySelectorAll('button'))
+        const node = buttons.find((item) => (item.textContent ?? '').includes(label))
+        if (node) {
+          node.click()
+          await flushPromises()
+          return
+        }
+      }
+      expect(button, '找不到按钮：' + label).toBeTruthy()
+      await button?.trigger('click')
+      await flushPromises()
+    }
+
+    // 大屏编辑：promptOpen 必须真的打开弹窗（而不是抛 .value 异常被吞进 toast）
+    await clickButton('大屏编辑')
+    expect(text()).toContain('编辑系统提示词')
+    await clickButton('完成')
+    expect(text()).not.toContain('编辑系统提示词')
+
+    // 手动输入 / 模型参数：两个 toggle 必须切换状态
+    const customBefore = wrapper.text().includes('手动输入')
+    await clickButton(customBefore ? '手动输入' : '从列表选择')
+    expect(wrapper.text()).toContain(customBefore ? '从列表选择' : '手动输入')
+    await clickButton('模型参数')
+    expect(wrapper.text()).toContain('温度 temperature')
+
+    // 测试 AI 弹窗：打开 / 关闭
+    await appRouter.push('/settings/system')
+    await flushPromises()
+    await clickButton('测试 AI')
+    expect(text()).toContain('测试 AI 调用')
+    await clickButton('关闭')
+    expect(text()).not.toContain('测试 AI 调用')
+
+    // 重置配置：打开后取消
+    await clickButton('重置配置覆盖')
+    expect(text()).toContain('将清空数据库中保存的所有配置覆盖项')
+    await clickButton('取消')
+
     expect(unexpected(consoleErrors)).toEqual([])
     expect(unexpected(consoleWarns)).toEqual([])
     wrapper.unmount()

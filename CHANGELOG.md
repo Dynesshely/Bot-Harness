@@ -14,12 +14,77 @@
   issue / PR 模板、`CODEOWNERS`、Dependabot 配置。
 - 容器发布工作流 `.github/workflows/release.yml`（推送 `ghcr.io/dynesshely/bot-harness`）。
 - 文档资产目录 `docs/assets/`（架构图、界面截图）。
+- 口吻轮换：`reply_style_variants`（最多 8 条、每条 ≤200 字的一句话风格）+
+  `reply_style_variant_probability`（0–1，默认 0.25）。每轮按概率抽一条追加到 stage 1 的
+  系统提示词；空数组 = 不启用，润色阶段的硬约束不变。
+- 引用回复改为**频率分档** `quote_reply_mode`（`never` / `occasionally`=30% / `often`=70%，
+  默认 `occasionally`）。旧布尔 `quote_reply` 继续兼容并在校验时双向同步
+  （`true`→`occasionally`、`false`→`never`）；按群覆盖仍是布尔，
+  `true`→`occasionally`、`false`→`never`、`null`→跟随全局，全局 `never` 时群覆盖打不开。
 
 ### Changed
 
 - README 面向开源用户重写：移除内部环境与运维记录，补充徽章、架构、截图、贡献/安全/许可章节。
 - `web/package.json`：公开包（`private: false`）、Apache-2.0、版本 `0.1.0`、仓库地址、
   锁定 `pnpm@11.25.0`。
+
+## [0.4.1] - 2026-11-12
+
+### Added
+
+- systemPrompt 注入当前会话身份：群聊带 `group_openid`，私聊带 `user_openid`。管理员在聊天里
+- README 重写为项目概览：同步 0.4.x 能力，压缩手册式细节，统一「是什么 / 为什么 / 怎么用 / 怎么管 / 怎么开发」的阅读顺序。
+  说「把本群设置改成…」时，模型能直接把正确 id 交给 `settings_read` / `settings_write`，
+  不再反问或猜错群。id 缺失时整块省略，群聊不注入成员私聊 OpenID。
+
+## [0.4.0] - 2026-11-12
+
+### Added
+
+- **表达方式库（expression）**：完全对齐 MaiBot 的 expression learner / selector：
+  - 异步从真实群聊学习「什么情境 -> 什么说法」，默认进待审，后台审核后才参与召回；
+  - `fast` 档按 use_count 加权随机；`precise` 档用 OpenAI 兼容 `/embeddings` 做余弦粗排，
+    再由主模型按当前语境选 0–`expression_inject_max` 条；embedding/选择失败自动退回 fast；
+  - 只召回本群 + 全局，默认不跨群；注入位置在人设/口吻之后、记忆之前；
+  - 新增 `expressions` 表（SQLite + PostgreSQL，迁移 0015）、后台「表达方式」页与 9 个配置键；
+  - 召回+选择总预算 2 秒，学习异步，任何失败都不影响回复。
+- **会话身份注入**：每轮 systemPrompt 带上「当前场景 + 群 OpenID / 用户 OpenID」，
+  管理员说「本群」时模型能直接把正确的 id 交给 `settings_read` / `settings_write`，
+  不用反问或猜。群聊注入 `group_openid`，私聊注入 `user_openid`；缺失时不输出空键。
+
+## [0.3.2] - 2026-11-11
+
+### Added
+
+- **人情味 2.0**，吸收 MaiBot 的可用做法并接进现有管线：
+  - 群消息合并（`reply_debounce_mode`）：未 @ 的连续消息先攒 1–7 秒（quiet / active 两档，
+    本群最近 60 秒人类消息 ≥3 条算活跃），窗口被新消息重置但整批硬上限 20 秒；只让第一条
+    （leader）跑模型，其余消息仍写时间线并各留一条 `debounced into <leader_msg_id>` 审计；
+    @ / 引用机器人 / 命令零延迟，`off` 与秒数 0 回到逐条处理。
+  - 分段气泡（`humanize_segment_split`）：长回复按标点概率拆成 1–3 条；代码块、链接、
+    引用块不拆；引用只挂第一条。
+  - 逐段打字（`humanize_typing_seconds_per_char` / `humanize_typing_max_seconds`）：
+    每条气泡前按字数等待，整轮有上限，已耗时扣除。
+  - 口吻轮换（`reply_style_variants` / `reply_style_variant_probability`）：按概率把一条
+    备用说话方式注入本轮提示词，草稿与润色稿共享同一份。
+  - 概率引用（`quote_reply_mode`）：never / occasionally（约 30%，默认）/ often（约 70%），
+    旧 `quote_reply` 布尔双向兼容；按群覆盖仍是布尔粒度，全局 never 是天花板。
+  - 新增 `reply_debounced_batches` / `reply_debounced_messages` 计数器（共 32 项）。
+
+## [0.3.1] - 2026-11-11
+
+### Fixed
+
+- 设置页：修复点击「大屏编辑 / 手动输入 / 模型参数 / 测试 AI / 重置配置覆盖」时
+  抛出 `Cannot create property 'value' on boolean 'false'` 的问题。根因是设置布局把
+  ref 装进 `reactive` 再 provide，子页解构后拿到的是普通 boolean；模板里的直接赋值被
+  编译成 `.value =`。现在布局直接 provide ref，并由布局提供打开/关闭/切换方法，
+  子页模板不再给 context 字段赋值。
+- 模型调用失败时，聊天里会带上脱敏后的错误摘要（HTTP 状态 / 上游 message / 超时/鉴权/
+  限流分类），不再只有笼统的「稍后再试」；5xx 只透状态码，URL、密钥、DSN 一律不出现。
+- PostgreSQL 下后台「合并同群会话」报 `column "n" does not exist`：`MergeableGroups` 的
+  `HAVING n > 1` / `ORDER BY n DESC` 引用了 SELECT 别名，SQLite 接受、PostgreSQL 不接受；
+  改用 `COUNT(*)` 并补真实 PG 测试。
 
 ## [0.3.0] - 2026-11-10
 

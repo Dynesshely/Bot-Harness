@@ -35,9 +35,9 @@ func TestPostgresSmoke(t *testing.T) {
 		t.Fatalf("dialect = %q, want %q", got, DriverPostgres)
 	}
 
-	// 16 tables: the fifteen store tables plus schema_migrations.
+	// 17 tables: the sixteen store tables plus schema_migrations.
 	wantTables := []string{
-		"commitments", "conversations", "dedup", "human_status", "join_decisions",
+		"commitments", "conversations", "dedup", "expressions", "human_status", "join_decisions",
 		"join_topics", "media", "memories", "messages", "proactive_state", "records",
 		"scheduled_tasks", "schema_migrations", "settings", "stats", "tool_calls",
 	}
@@ -200,6 +200,63 @@ func TestPostgresQueries(t *testing.T) {
 	// the oldest row of page 1.
 	if older[len(older)-1].ID >= first[0].ID {
 		t.Fatalf("pages overlap: page1 oldest=%d page2 newest=%d", first[0].ID, older[len(older)-1].ID)
+	}
+
+	// --- expressions: upsert RETURNING + list on PostgreSQL -----------------
+	exprGroup := groupID + ":EXPR"
+	exprCleanup := func() {
+		_, _ = s.execContext(ctx, `DELETE FROM expressions WHERE group_openid = ?`, exprGroup)
+	}
+	exprCleanup()
+	defer exprCleanup()
+	expr, err := s.AddExpression(ctx, ExpressionInput{GroupOpenID: exprGroup, Situation: "有人问吃了吗", Style: "刚吃完", Enabled: true})
+	if err != nil {
+		t.Fatalf("add expression: %v", err)
+	}
+	dup, err := s.AddExpression(ctx, ExpressionInput{GroupOpenID: exprGroup, Situation: "有人问吃了吗", Style: "刚吃完", Enabled: true})
+	if err != nil || dup.ID != expr.ID || dup.UseCount != 2 {
+		t.Fatalf("expression upsert: %+v %+v %v", expr, dup, err)
+	}
+	exprs, exprTotal, err := s.ListExpressions(ctx, ExpressionFilter{GroupOpenID: exprGroup, Page: 1, PageSize: 10})
+	if err != nil || exprTotal != 1 || len(exprs) != 1 {
+		t.Fatalf("list expressions: total=%d len=%d err=%v", exprTotal, len(exprs), err)
+	}
+
+	// --- GROUP BY + HAVING on a SELECT alias (MergeableGroups) --------------
+	// PostgreSQL resolves HAVING before the SELECT alias exists, so the query
+	// must repeat COUNT(*) instead of `HAVING n > 1`. SQLite accepts the alias,
+	// which is why only a real PG run catches this.
+	mergeGroup := groupID + ":MERGE"
+	mergeA := mergeGroup + ":A"
+	mergeB := mergeGroup + ":B"
+	mergeCleanup := func() {
+		_, _ = s.execContext(ctx, `DELETE FROM conversations WHERE group_openid = ?`, mergeGroup)
+	}
+	mergeCleanup()
+	defer mergeCleanup()
+	for _, id := range []string{mergeA, mergeB} {
+		if err := s.EnsureConversation(ctx, &Conversation{
+			ID: id, Scene: SceneGroupMember, GroupOpenID: mergeGroup, MemberOpenID: "U1",
+		}); err != nil {
+			t.Fatalf("ensure merge conversation %s: %v", id, err)
+		}
+	}
+	merges, err := s.MergeableGroups(ctx, 100)
+	if err != nil {
+		t.Fatalf("mergeable groups: %v", err)
+	}
+	var mergeEntry *GroupConversationSummary
+	for i := range merges {
+		if merges[i].GroupOpenID == mergeGroup {
+			mergeEntry = &merges[i]
+			break
+		}
+	}
+	if mergeEntry == nil {
+		t.Fatalf("group %q missing from MergeableGroups: %+v", mergeGroup, merges)
+	}
+	if len(mergeEntry.Conversations) != 2 {
+		t.Fatalf("mergeable conversations = %d, want 2", len(mergeEntry.Conversations))
 	}
 
 	// --- GROUP BY aggregate with a correlated subquery (TopGroups) ----------

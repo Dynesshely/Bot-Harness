@@ -714,7 +714,8 @@ func TestProactiveAtOnlyGroupsEarnNoCreditsFromMentions(t *testing.T) {
 	// 放开限流/冷却：这条测试要的是额度口径，不是限流。
 	h.apply(t, `{"proactive_level":"auto","proactive_ratio":3,"proactive_min_interval_minutes":1,`+
 		`"proactive_quiet_start":0,"proactive_quiet_end":0,"trigger_mode":"at_only","markdown_enabled":false,`+
-		`"rate_limit_user_qpm":600,"rate_limit_group_qpm":600,"group_cooldown_seconds":0}`)
+		`"rate_limit_user_qpm":600,"rate_limit_group_qpm":600,"group_cooldown_seconds":0,`+
+		`"reply_debounce_mode":"off"}`)
 
 	for i := 0; i < 9; i++ {
 		h.dis.HandlePayload(context.Background(),
@@ -749,13 +750,15 @@ func TestProactiveAllMessagesChatterEarnsCredits(t *testing.T) {
 	// 放开限流/冷却：E2 默认有每群冷却，6 条连发会被丢掉，测不到额度。
 	h.apply(t, `{"proactive_level":"auto","proactive_ratio":3,"proactive_min_interval_minutes":1,`+
 		`"proactive_quiet_start":0,"proactive_quiet_end":0,"trigger_mode":"all_messages","markdown_enabled":false,`+
-		`"rate_limit_user_qpm":600,"rate_limit_group_qpm":600,"group_cooldown_seconds":0}`)
+		`"rate_limit_user_qpm":600,"rate_limit_group_qpm":600,"group_cooldown_seconds":0,`+
+		`"reply_debounce_mode":"off"}`)
 
 	// E2：未 @ 机器人的群消息也会触发回复（所以它们是 dialogue），但属于自然交谈。
 	for i := 0; i < 6; i++ {
 		h.dis.HandlePayload(context.Background(),
 			groupAnyMessage(fmt.Sprintf("E2%d", i), "G1", "U1", "小明", fmt.Sprintf("群友闲聊 %d", i+1)))
 	}
+	// 关掉防抖后逐条处理，等六条回复都发完再统计额度。
 	h.waitForSent(t, 6)
 
 	human, err := h.st.CountHumanMessagesSince(context.Background(), "G1", time.Now().Add(-time.Hour))

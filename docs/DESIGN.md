@@ -58,6 +58,11 @@ QQ 平台              │                                                      
 
 关键点：**两个事件通道在 `dispatcher` 处汇合**，所以无论走 WebSocket 还是 Webhook，去重、限流、上下文、回复路径完全一致；同时开启时，同一事件的第二次到达会被 `msg_id` 幂等丢弃。
 
+> **0.4.x 的内部变化**：拓扑仍是单进程，没有拆服务。`internal/core` 多了 join gate、消息防抖、
+> 人味 / 分段 / 口吻、情绪与表达方式管线；`internal/ai` 多了 OpenAI 兼容 `/embeddings`；
+> `internal/store` 多了 expression / affect / join 决策数据。表达库的学习与召回复用同一条
+> `core → ai → store` 路径，不引入独立向量服务。
+
 ## 4. 关键设计
 
 ### 4.1 事件接入
@@ -173,7 +178,7 @@ QQ 平台              │                                                      
 `Sender.Send(Text)`（`Text` 为空则发「图片发送失败」）。**图片发送失败绝不等于命令失败** ——
 命令已经执行完，丢掉的只能是排版。`/tokenstats` 与 `/help` 仍只返回 `Text`。
 
-用户侧的用法与排查见 README §5.13；新增配置键时**不需要**动命令层。
+用户侧的用法与排查见 README「Bot 命令」；新增配置键时**不需要**动命令层。
 
 #### 4.2.3 QQ 指令面板同步（`internal/core/command_panel.go` + `internal/qq/panels.go`，决策见 D-043）
 
@@ -204,7 +209,7 @@ go dispatcher.WarmIdentity(rootCtx)
   关闭只挡自动同步，`POST /api/actions/sync-commands` 始终可手动触发。
 - **可观测**：成功 INFO `command panel synced`（`component=command-panel`，带 scope / panel_id /
   action / version）；失败 WARN `command panel sync failed`；耗尽 WARN `command panel auto sync gave up`。
-  平台的 `code`/`message` 原样透出（手动动作是 `502 upstream_error`）。排查见 README §5.13.7。
+  平台的 `code`/`message` 原样透出（手动动作是 `502 upstream_error`）。排查见 README「QQ 指令面板」。
 
 #### 4.2.4 承诺 worker（`internal/core/commitments.go`，决策见 D-044）
 

@@ -5,11 +5,37 @@ import SelectMenu from '@/components/SelectMenu.vue'
 import TextField from '@/components/TextField.vue'
 import ToggleField from '@/components/ToggleField.vue'
 
+const QUOTE_REPLY_MODES = [
+  { value: 'never', label: 'never · 不引用' },
+  { value: 'occasionally', label: 'occasionally · 约 30%（默认）' },
+  { value: 'often', label: 'often · 约 70%' },
+]
+
+const SEGMENT_SPLITS = [
+  { value: 'off', label: 'off · 一条发完' },
+  { value: 'soft', label: 'soft · 偶尔分条' },
+  { value: 'medium', label: 'medium · 自然分条（默认）' },
+  { value: 'strong', label: 'strong · 更爱分条' },
+]
+
+const DEBOUNCE_MODES = [
+  { value: 'off', label: 'off · 不合并' },
+  { value: 'fast', label: 'fast · 快' },
+  { value: 'natural', label: 'natural · 自然（默认）' },
+  { value: 'steady', label: 'steady · 沉稳' },
+]
+
 const HUMANIZE_LEVELS = [
   { value: 'off', label: 'off · 立即回复' },
   { value: 'soft', label: 'soft · 轻微停顿' },
   { value: 'medium', label: 'medium · 中等（默认）' },
   { value: 'strong', label: 'strong · 更慢、更爱沉默' },
+]
+
+const EXPRESSION_MODES = [
+  { value: 'off', label: 'off · 不召回' },
+  { value: 'fast', label: 'fast · 关键词匹配（默认）' },
+  { value: 'precise', label: 'precise · 向量召回' },
 ]
 
 const { draft } = useConfig()
@@ -38,6 +64,56 @@ const { draft } = useConfig()
               :max="3"
               hint="0.5–3；乘在所有停顿上，觉得太慢就调小"
             />
+            <SelectMenu
+              id="cfg-quote-mode"
+              v-model="draft.quote_reply_mode"
+              label="引用频率 quote_reply_mode"
+              :options="QUOTE_REPLY_MODES"
+              hint="不再每条都引用：偶尔引用更像真人；按群覆盖仍可单独关掉"
+            />
+            <SelectMenu
+              id="cfg-segment-split"
+              v-model="draft.humanize_segment_split"
+              label="分段气泡 humanize_segment_split"
+              :options="SEGMENT_SPLITS"
+              hint="像人一样把一段话拆成几条发；代码块、链接、引用块不会拆"
+            />
+            <NumberField
+              v-model="draft.humanize_typing_seconds_per_char"
+              label="打字速度 humanize_typing_seconds_per_char"
+              :step="0.05"
+              :min="0.05"
+              :max="1"
+              hint="每条气泡前的模拟输入时间（秒/字）；中文按 1×、英文按 0.5×"
+            />
+            <NumberField
+              v-model="draft.humanize_typing_max_seconds"
+              label="打字等待上限 humanize_typing_max_seconds"
+              :min="0"
+              :max="30"
+              hint="整轮模拟打字的等待上限（秒）；0 = 不额外等待"
+            />
+            <SelectMenu
+              id="cfg-debounce-mode"
+              v-model="draft.reply_debounce_mode"
+              label="群消息合并 reply_debounce_mode"
+              :options="DEBOUNCE_MODES"
+              hint="未 @ 的连续消息先攒一会儿，合并成一次理解；@ 与引用机器人立即处理"
+            />
+            <NumberField
+              v-model="draft.reply_debounce_quiet_seconds"
+              label="安静群窗口 reply_debounce_quiet_seconds"
+              :min="0"
+              :max="15"
+              hint="群最近 60 秒少于 3 条人类消息时等待的秒数"
+            />
+            <NumberField
+              v-model="draft.reply_debounce_active_seconds"
+              label="活跃群窗口 reply_debounce_active_seconds"
+              :min="0"
+              :max="15"
+              hint="群最近 60 秒至少 3 条人类消息时等待的秒数"
+            />
             <div class="sm:col-span-2 xl:col-span-1">
               <label class="label" for="cfg-persona">人设 persona</label>
               <input
@@ -49,9 +125,138 @@ const { draft } = useConfig()
               <p class="field-hint">一句话描述角色，会附加到系统提示词。</p>
             </div>
           </div>
+          <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div class="sm:col-span-2 xl:col-span-2">
+              <label class="label" for="cfg-style-variants">口吻轮换 reply_style_variants</label>
+              <textarea
+                id="cfg-style-variants"
+                :value="draft.reply_style_variants.join('\n')"
+                class="input h-20 resize-y"
+                spellcheck="false"
+                placeholder="用 1–2 个字回复&#10;带一点翻译腔"
+                @input="draft.reply_style_variants = ($event.target as HTMLTextAreaElement).value.split('\n').map((s) => s.trim()).filter(Boolean)"
+              ></textarea>
+              <p class="field-hint">
+                每行一条备用说话方式，最多 8 条、每条 200 字。留空 = 不启用。
+              </p>
+            </div>
+            <NumberField
+              v-model="draft.reply_style_variant_probability"
+              label="每轮触发概率 reply_style_variant_probability"
+              :step="0.05"
+              :min="0"
+              :max="1"
+              hint="0–1，默认 0.25；每轮按该概率抽一条追加到系统提示词（人设之后、记忆之前）"
+            />
+          </div>
+          <p class="field-hint mt-2">
+            口吻变体只改这一轮的措辞，不会进入润色阶段的硬约束；同一条回复的草稿与润色稿看到的是同一条变体。
+          </p>
           <p class="field-hint mt-2">
             停顿按「整轮耗时」计算：模型已经想了好几秒的话术，不会再多等，避免变成拖沓。
             @ 机器人的消息永远会回，沉默只作用于群里的普通消息。
+          </p>
+        </div>
+
+        <!-- 表达方式库：从群聊里学「什么情境用什么说法」，生成前召回几条参考 -->
+        <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 class="flex items-center gap-2 text-sm font-medium text-slate-200">
+              表达方式
+              <span
+                class="badge"
+                :class="
+                  draft.expression_enabled
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                    : 'border-slate-700 bg-slate-800/60 text-slate-400'
+                "
+              >
+                {{ draft.expression_enabled ? '已启用' : '默认关闭' }}
+              </span>
+            </h3>
+            <ToggleField
+              v-model="draft.expression_enabled"
+              label="启用 expression_enabled"
+              class="min-w-[12rem]"
+            />
+          </div>
+          <p class="mb-3 text-xs text-slate-500">
+            从真实群聊里学习「当 <b class="text-slate-300">某情境</b> 时，可以用
+            <b class="text-slate-300">某说法</b>」，回复前召回几条作为参考追加到系统提示词
+            （人设 / 口吻之后、记忆之前）。<b class="text-slate-300">默认关闭</b>；
+            关闭时学习、召回、注入都不发生，回复管线与没有这个库时完全一致。
+          </p>
+          <div
+            class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
+            :class="draft.expression_enabled ? '' : 'opacity-60'"
+          >
+            <SelectMenu
+              id="cfg-expression-mode"
+              v-model="draft.expression_mode"
+              label="召回档位 expression_mode"
+              :options="EXPRESSION_MODES"
+              :disabled="!draft.expression_enabled"
+              hint="fast 关键词匹配（零额外调用）；precise 用 embedding 做向量召回，未配置时后端自动降级 fast"
+            />
+            <TextField
+              v-model="draft.expression_embedding_model"
+              label="向量模型 expression_embedding_model"
+              mono
+              placeholder="留空 = 复用主模型"
+              :disabled="!draft.expression_enabled || draft.expression_mode !== 'precise'"
+              hint="仅 precise 使用；与主模型同一个端点"
+            />
+            <NumberField
+              v-model="draft.expression_recall_limit"
+              label="召回条数 expression_recall_limit"
+              :min="4"
+              :max="50"
+              :disabled="!draft.expression_enabled"
+              hint="一次最多取几条候选；4–50，默认 12"
+            />
+            <NumberField
+              v-model="draft.expression_inject_max"
+              label="注入上限 expression_inject_max"
+              :min="1"
+              :max="5"
+              :disabled="!draft.expression_enabled"
+              hint="一次最多把几条写进提示词；1–5，默认 3"
+            />
+            <NumberField
+              v-model="draft.expression_learn_every"
+              label="学习间隔 expression_learn_every（轮）"
+              :min="1"
+              :max="100"
+              :disabled="!draft.expression_enabled || !draft.expression_learn_enabled"
+              hint="每 N 个完成的回合学习一次；1–100，默认 20"
+            />
+            <ToggleField
+              v-model="draft.expression_learn_enabled"
+              label="自动学习 expression_learn_enabled"
+              :disabled="!draft.expression_enabled"
+              hint="从已完成的回合里抽取候选表达；总开关关闭时不生效"
+            />
+            <ToggleField
+              v-model="draft.expression_review_enabled"
+              label="新表达先待审 expression_review_enabled"
+              :disabled="!draft.expression_enabled"
+              hint="学习结果先进待审队列，在「表达方式」页审核后才会注入；关掉 = 学到即生效"
+            />
+            <ToggleField
+              v-model="draft.expression_share_global"
+              label="跨群共享 expression_share_global"
+              :disabled="!draft.expression_enabled"
+              hint="关闭时每个群的表达只在本群召回；打开后学到的表达可以跨群使用"
+            />
+          </div>
+          <p v-if="!draft.expression_enabled" class="field-hint mt-2">
+            已关闭：不会学习也不会注入。上面的参数会原样保留，重新打开后继续生效。
+          </p>
+          <p v-else class="field-hint mt-2">
+            学习与召回都在后台异步进行、失败只记日志，<b>不会让一条回复失败</b>。
+            库里的内容可以在
+            <RouterLink :to="{ name: 'expressions' }" class="link">表达方式</RouterLink>
+            页搜索、启停、删除或手工新增。
           </p>
         </div>
 

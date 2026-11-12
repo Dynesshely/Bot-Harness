@@ -218,14 +218,42 @@ func (d *Dispatcher) groupBusy(level string) bool {
 	return n >= int(threshold)
 }
 
-// promptFor resolves the prompt for a specific group: base + memory + humanize.
+// promptFor resolves the prompt for a specific group: base + humanize + style.
+//
+// 这里只放**表达层**的段落，记忆、承诺等事实块由 turn.go 依次追加在后面。
+// 风格变体因此天然落在「人设/人味之后、记忆之前」的位置。
 func (d *Dispatcher) promptFor(s settings.Settings, cfg settings.GroupConfig) string {
 	prompt := d.ResolvePrompt()
 	level := humanizeLevel(s, cfg)
 	if extra := humanizePrompt(level, s.Persona, time.Now(), d.groupBusy(level)); extra != "" {
 		prompt += "\n\n" + extra
 	}
+	if variant := d.styleVariantForTurn(s); variant != "" {
+		prompt += "\n\n本轮说话方式：" + variant
+	}
 	return prompt
+}
+
+// styleVariantForTurn picks at most one configured speaking style for this turn.
+//
+// 概率是**每轮**掷一次：同一轮里主模型与（可选的）润色阶段看到的是同一条风格，
+// 否则草稿和润色稿会互相打架。空数组或概率 0 等于不启用；未掷中则提示词里
+// 连一个空行都不会多出来，保持与旧行为逐字节一致。
+func (d *Dispatcher) styleVariantForTurn(s settings.Settings) string {
+	if len(s.ReplyStyleVariants) == 0 || s.ReplyStyleVariantProbability <= 0 {
+		return ""
+	}
+	roll := d.rollStyle()
+	if roll >= s.ReplyStyleVariantProbability {
+		return ""
+	}
+	// 用同一掷的归一化位置选条目：roll/p ∈ [0,1) 仍是均匀分布，却只需要一次
+	// 随机（测试注入常数时行为完全可预测）。
+	at := int(roll / s.ReplyStyleVariantProbability * float64(len(s.ReplyStyleVariants)))
+	if at < 0 || at >= len(s.ReplyStyleVariants) {
+		at = 0
+	}
+	return s.ReplyStyleVariants[at]
 }
 
 // rollSilence returns a number in [0,1); tests override it to make the decision

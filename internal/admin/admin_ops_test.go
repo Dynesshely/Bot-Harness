@@ -78,6 +78,8 @@ func TestAdminStatusEndpoint(t *testing.T) {
 		"events_received", "events_deduped", "events_ignored", "replies_sent", "replies_failed",
 		// 两阶段生成的两个计数器：后台概览直接读这两个键。
 		"polish_requests", "polish_fallbacks",
+		// 群聊消息合并：批次窗口数与被并入批次的后续消息数。
+		"reply_debounced_batches", "reply_debounced_messages",
 	} {
 		if _, present := counters[key]; !present {
 			t.Fatalf("counters is missing %q: %#v", key, counters)

@@ -236,6 +236,53 @@ describe('PoliciesPage 搜索', () => {
   })
 })
 
+describe('PoliciesPage 引用频率', () => {
+  it('全局引用是 SelectMenu（不是原生开关），默认落在 occasionally', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const trigger = wrapper.find('#cfg-quote-reply-mode')
+    expect(trigger.exists(), '全局引用频率控件没渲染').toBe(true)
+    expect(trigger.text()).toContain('occasionally')
+    // 原生 <select> 已全站禁用，这里必须是自定义下拉
+    expect(wrapper.find('select').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('改成 never 只提交 quote_reply_mode（不重复提交旧布尔）', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('#cfg-quote-reply-mode').trigger('click')
+    const never = wrapper.findAll('[role="option"]').find((option) => option.text().includes('never'))
+    expect(never, '下拉里没有 never 档').toBeTruthy()
+    await never?.trigger('click')
+
+    const button = wrapper.findAll('button').find((item) => item.text().includes('保存策略'))
+    expect(button).toBeTruthy()
+    await button?.trigger('click')
+    await flushPromises()
+
+    expect(api.policies.update).toHaveBeenCalledTimes(1)
+    const patch = api.policies.update.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(Object.keys(patch)).toEqual(['quote_reply_mode'])
+    expect(patch.quote_reply_mode).toBe('never')
+    wrapper.unmount()
+  })
+
+  it('老后端只下发布尔时按 quote_reply 推导档位（false → never）', async () => {
+    const fixture = structuredClone(policiesFixture)
+    fixture.quote_reply = false
+    delete (fixture as Record<string, unknown>).quote_reply_mode
+    api.policies.get.mockResolvedValue(fixture)
+
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('#cfg-quote-reply-mode').text()).toContain('never')
+    wrapper.unmount()
+  })
+})
+
 describe('PoliciesPage 保存', () => {
   async function saveAfterEdit(wrapper: ReturnType<typeof mountPage>) {
     const button = wrapper.findAll('button').find((item) => item.text().includes('保存策略'))

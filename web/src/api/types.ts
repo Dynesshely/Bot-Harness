@@ -48,6 +48,11 @@ export type TriggerMode = 'at_only' | 'all_messages'
 export type ContextScope = 'addressed_only' | 'include_unaddressed'
 
 export type ContextMode = 'per_member' | 'shared'
+/**
+ * 表达方式库的召回档位：off 不召回 / fast 关键词匹配（零额外调用）/
+ * precise 向量召回（需要 embedding 模型，未配置时后端自动降级 fast）。
+ */
+export type ExpressionMode = 'off' | 'fast' | 'precise'
 export type ConversationScene = 'group_member' | 'group_shared' | 'c2c'
 export type MessageDirection = 'in' | 'out'
 export type MessageStatus = 'received' | 'replied' | 'ignored' | 'deduped' | 'failed'
@@ -260,6 +265,27 @@ export interface EditableConfig {
   /** 每天最多加入几次（1–100，默认 12）。 */
   join_gate_max_per_day?: number
   /**
+   * 表达方式库：按「情境 → 说法」学习本群的表达习惯，生成前召回几条参考。
+   * 全局总开关默认关；关闭时回复管线与没有这个库时完全一致。
+   */
+  expression_enabled?: boolean
+  /** 召回档位：off 不召回 / fast 关键词匹配 / precise 向量召回。 */
+  expression_mode?: ExpressionMode
+  /** 向量召回使用的 embedding 模型；空串 = 复用主模型端点。 */
+  expression_embedding_model?: string
+  /** 一次召回最多返回几条候选（4–50，默认 12）。 */
+  expression_recall_limit?: number
+  /** 一次最多注入几条到提示词（1–5，默认 3）。 */
+  expression_inject_max?: number
+  /** 从已完成的回合里学习新的表达方式（总开关关时不生效）。 */
+  expression_learn_enabled?: boolean
+  /** 每 N 个回合学习一次（1–100，默认 20）。 */
+  expression_learn_every?: number
+  /** 学习结果先进待审队列，由「表达方式」页审核发布。 */
+  expression_review_enabled?: boolean
+  /** 允许跨群共享学到的表达方式。 */
+  expression_share_global?: boolean
+  /**
    * 情绪状态：按内容包积累 5 维数值，注入到系统提示词并影响回复行为。
    * 默认关；关闭时现有行为零变化。
    */
@@ -300,7 +326,30 @@ export interface EditableConfig {
   /** 人味：回复节奏与风格（off/soft/medium/strong）。 */
   humanize_level?: string
   humanize_delay_scale?: number
+  /** 分段气泡档位 off/soft/medium/strong。 */
+  humanize_segment_split?: string
+  /** 每条气泡前的模拟打字速度（秒/字）。 */
+  humanize_typing_seconds_per_char?: number
+  /** 整轮模拟打字等待上限（秒）。 */
+  humanize_typing_max_seconds?: number
+  /** 群消息合并档位 off/fast/natural/steady。 */
+  reply_debounce_mode?: string
+  /** 安静群 / 活跃群的合并窗口（秒）。 */
+  reply_debounce_quiet_seconds?: number
+  reply_debounce_active_seconds?: number
   persona?: string
+  /** 引用频率分档 never/occasionally/often（兼容布尔 quote_reply）。 */
+  quote_reply_mode?: string
+  /** 兼容布尔视图；读取时用来推导 quote_reply_mode。 */
+  quote_reply?: boolean
+  /**
+   * 口吻轮换：备用的说话方式（每条形如「用 1–2 个字回复」「带一点翻译腔」）。
+   * 每轮按 reply_style_variant_probability 的概率抽一条追加到系统提示词；
+   * 空数组 = 不启用。
+   */
+  reply_style_variants?: string[]
+  /** 每轮应用一条口吻变体的概率（0–1，默认 0.25）。 */
+  reply_style_variant_probability?: number
   /** 联网：web_fetch / web_search。 */
   web_enabled?: boolean
   web_search_provider?: string
@@ -436,8 +485,10 @@ export interface Policies {
   blocked_keywords: string[]
   /** 是否回复「其他机器人 @ 我们」的消息（默认允许）。 */
   reply_to_bots: boolean
-  /** 是否以引用回复的形式回答（全局默认，默认开启；可按群覆盖）。 */
+  /** 引用回复的兼容布尔视图（true = 非 never）。 */
   quote_reply: boolean
+  /** 引用频率分档：never / occasionally / often（默认 occasionally ≈30%）。 */
+  quote_reply_mode?: QuoteReplyMode
   warnings?: string[]
 }
 
@@ -538,12 +589,16 @@ export interface ConversationDetail extends Conversation {
    * 平台配额是共享的（未认证 30 条/分钟、单群 1000 条/天），私聊恒为 0。
    */
   active_today?: number
-  /** 该群当前生效的「引用回复」开关。 */
+  /** 该群当前生效的「引用回复」开关（兼容布尔视图）。 */
   quote_reply?: boolean
+  /** 该群生效的引用频率档位。 */
+  quote_reply_mode?: QuoteReplyMode
   /** 按群覆盖值；null 表示跟随全局。 */
   quote_reply_override?: boolean | null
   /** 全局默认值。 */
   quote_reply_global?: boolean
+  /** 全局引用频率档位。 */
+  quote_reply_global_mode?: QuoteReplyMode
 }
 
 /** POST /api/conversations/{id}/messages 的结果。 */
@@ -788,15 +843,22 @@ export interface ModelsData {
   fetched_at: string
 }
 
+/** 引用回复频率分档：0% / ~30% / ~70%。 */
+export type QuoteReplyMode = 'never' | 'occasionally' | 'often'
+
 /** POST /api/conversations/{id}/quote-reply 的结果。 */
 export interface QuoteReplyState {
   group_openid: string
-  /** 生效值。 */
+  /** 生效的兼容布尔视图（false 仅当生效档位是 never）。 */
   quote_reply: boolean
+  /** 该群生效的引用频率档位。 */
+  quote_reply_mode?: QuoteReplyMode
   /** 按群覆盖值；null 表示跟随全局。 */
   override?: boolean | null
-  /** 全局默认值。 */
+  /** 全局兼容布尔视图。 */
   global: boolean
+  /** 全局档位。 */
+  global_mode?: QuoteReplyMode
 }
 
 /* ------------------------------------------------------------------ *
@@ -907,6 +969,48 @@ export interface MemoryItem {
   hits: number
   last_used_at: string
   created_at: string
+}
+
+/* ------------------------------------------------------------------ *
+ * 表达方式库（GET /api/expressions）
+ *
+ * 一行 = 一条「当 <情境> 时，可以用 <说法>」的语料。学习（core）写入，
+ * 后台只做审核与人工维护：新增 / 启停 / 删除 / 强化。
+ * ------------------------------------------------------------------ */
+
+export interface ExpressionItem {
+  id: number
+  /** 归属群；空 = 全局（管理员新增或显式共享）。 */
+  group_openid: string
+  /** 情境：什么场合下这么说。 */
+  situation: string
+  /** 说法：这个场合下可以怎么说。 */
+  style: string
+  /** 来源：admin 人工新增 / learn 模型学习 / import 导入。 */
+  source: string
+  enabled: boolean
+  /** 被召回 / 使用的次数，用于观察是否有用。 */
+  use_count: number
+  /** 人工强化次数：被强化的行在召回排序里更靠前。 */
+  weight?: number
+  /** 向量召回用的向量（后端不下发时缺省）。 */
+  has_embedding?: boolean
+  created_at: string
+  updated_at?: string
+}
+
+export interface ExpressionQuery {
+  group_openid?: string
+  enabled?: boolean | ''
+  q?: string
+  page?: number
+  page_size?: number
+}
+
+export interface ExpressionInput {
+  group_openid: string
+  situation: string
+  style: string
 }
 
 /* ------------------------------------------------------------------ *

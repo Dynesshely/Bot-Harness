@@ -278,8 +278,10 @@ async function toggleQuoteReply() {
     detail.value = {
       ...current,
       quote_reply: state.quote_reply,
+      quote_reply_mode: state.quote_reply_mode ?? current.quote_reply_mode,
       quote_reply_override: state.override ?? null,
       quote_reply_global: state.global,
+      quote_reply_global_mode: state.global_mode ?? current.quote_reply_global_mode,
     }
     if (!state.quote_reply) quoteTarget.value = null
     toast.success(state.quote_reply ? '已开启引用回复' : '已关闭引用回复')
@@ -706,7 +708,7 @@ function goBack() {
                 :disabled="quoteToggling"
                 :title="
                   detail.quote_reply
-                    ? '回答时会引用触发它的那条消息，点击关闭（只影响本群）'
+                    ? '回答时按全局档位概率引用触发它的那条消息，点击关闭（只影响本群）'
                     : '回答时不再引用触发消息，点击开启（只影响本群）'
                 "
                 @click="toggleQuoteReply"

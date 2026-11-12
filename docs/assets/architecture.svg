@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1240" height="720" viewBox="0 0 1240 720" role="img" aria-labelledby="title desc">
   <title id="title">Bot Harness runtime architecture</title>
-  <desc id="desc">Single Go process: QQ gateway and webhook, core pipeline, OpenAI compatible AI client, store, settings, tools, renderer and admin SPA; external QQ platform, OpenAI endpoint, SearxNG sidecar and browser.</desc>
+  <desc id="desc">Single Go process: QQ gateway and webhook, core pipeline with join gate, message debounce, humanize, affect and expression library, OpenAI compatible chat and embeddings, store, settings, tools, renderer and admin SPA; external QQ platform, OpenAI endpoint, SearxNG sidecar and browser.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
@@ -25,7 +25,7 @@
 
   <rect class="bg" x="0" y="0" width="1240" height="720" rx="14"/>
   <text x="40" y="42" class="title">Bot Harness · runtime architecture</text>
-  <text x="40" y="64" class="sub">one Go binary, one container · admin SPA embedded with go:embed</text>
+  <text x="40" y="64" class="sub">one Go binary, one container · admin SPA embedded · humanlike expression layer</text>
 
   <!-- external -->
   <rect class="box-ext" x="40" y="108" width="200" height="86" rx="10"/>
@@ -53,23 +53,26 @@
   <rect x="590" y="72" width="330" height="164" rx="10" class="box-strong"/>
   <text x="755" y="104" text-anchor="middle" class="title">internal/core</text>
   <text x="755" y="130" text-anchor="middle" class="sub">dispatcher · turn · reply · agent loop</text>
-  <text x="755" y="152" text-anchor="middle" class="sub">commands · polish · memory · proactive</text>
-  <text x="755" y="174" text-anchor="middle" class="sub">commitments · human_status · humanize</text>
-  <text x="755" y="204" text-anchor="middle" class="tiny">policy / dedup / rate limit / context</text>
+  <text x="755" y="152" text-anchor="middle" class="sub">join_gate · debounce · humanize · affect</text>
+  <text x="755" y="174" text-anchor="middle" class="sub">polish · expressions · memory · proactive</text>
+  <text x="755" y="196" text-anchor="middle" class="sub">commands · commitments · human_status</text>
+  <text x="755" y="220" text-anchor="middle" class="tiny">policy / dedup / rate limit / context</text>
 
-  <rect x="970" y="88" width="230" height="76" rx="10" class="box"/>
+  <rect x="970" y="88" width="230" height="92" rx="10" class="box"/>
   <text x="1085" y="118" text-anchor="middle" class="title">internal/ai</text>
-  <text x="1085" y="142" text-anchor="middle" class="sub">OpenAI protocol · tools · vision</text>
+  <text x="1085" y="142" text-anchor="middle" class="sub">OpenAI protocol · chat</text>
+  <text x="1085" y="162" text-anchor="middle" class="sub">embeddings · tools · vision</text>
 
   <rect x="300" y="300" width="230" height="92" rx="10" class="box"/>
   <text x="415" y="330" text-anchor="middle" class="title">internal/tools</text>
   <text x="415" y="354" text-anchor="middle" class="sub">registry · SSRF guard</text>
   <text x="415" y="374" text-anchor="middle" class="sub">run_shell（双控，默认关）</text>
 
-  <rect x="590" y="300" width="330" height="92" rx="10" class="box"/>
+  <rect x="590" y="300" width="330" height="108" rx="10" class="box"/>
   <text x="755" y="330" text-anchor="middle" class="title">internal/store</text>
   <text x="755" y="354" text-anchor="middle" class="sub">PostgreSQL 17（推荐） / SQLite（回退）</text>
   <text x="755" y="374" text-anchor="middle" class="sub">dialect · migrations · media</text>
+  <text x="755" y="394" text-anchor="middle" class="sub">expressions · affect · join decisions</text>
 
   <rect x="970" y="300" width="230" height="92" rx="10" class="box"/>
   <text x="1085" y="330" text-anchor="middle" class="title">internal/settings</text>
@@ -97,6 +100,7 @@
   <path class="edge-blue" d="M 530 559 L 590 559"/>
   <path class="edge-blue" d="M 530 540 L 562 540 L 562 240 L 590 240"/>
   <path class="edge-blue" d="M 755 236 L 755 300"/>
+  <text x="770" y="270" class="tiny">context / expressions</text>
   <path class="edge-blue" d="M 590 200 L 530 200 L 530 300"/>
   <path class="edge" d="M 920 200 L 950 200 L 950 346 L 970 346"/>
   <path class="edge-dash" d="M 415 392 L 415 440"/>

@@ -12,8 +12,8 @@ import ToggleField from '@/components/ToggleField.vue'
 
 const { draft, config } = useConfig()
 
-const qqSecretSet = computed(() => config?.qq_app_secret_set === true)
-const adminTokenSet = computed(() => config?.admin_token_set === true)
+const qqSecretSet = computed(() => config.value?.qq_app_secret_set === true)
+const adminTokenSet = computed(() => config.value?.admin_token_set === true)
 
 /* ------------------------------------------------------------------ *
  * QQ 指令面板：启动时自动同步开关 + 「立即同步」动作

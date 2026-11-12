@@ -6,7 +6,7 @@ import NumberField from '@/components/NumberField.vue'
 import SelectMenu from '@/components/SelectMenu.vue'
 import ToggleField from '@/components/ToggleField.vue'
 
-const { draft, loaded, saving, apiKeySource, modelIds, modelsBaseUrl, modelsFetchedAt, modelsLoading, modelsError, customModel, modelMissingFromList, promptOpen, modelParamsOpen, modelParamsDirtyCount, clearStoredKey, loadModels } = useConfig()
+const { draft, loaded, saving, apiKeySource, modelIds, modelsBaseUrl, modelsFetchedAt, modelsLoading, modelsError, customModel, modelMissingFromList, promptOpen, modelParamsOpen, modelParamsDirtyCount, openPrompt, closePrompt, toggleCustomModel, toggleModelParams, clearStoredKey, loadModels } = useConfig()
 
 /**
  * 模型下拉的选项。
@@ -16,7 +16,7 @@ const { draft, loaded, saving, apiKeySource, modelIds, modelsBaseUrl, modelsFetc
  */
 const modelSelectOptions = computed(() => {
   const current = draft.model
-  const ids = modelIds
+  const ids = modelIds.value
   const options: { value: string; label: string; desc?: string }[] = []
   if (current && !ids.includes(current)) {
     options.push({ value: current, label: current, desc: '不在上游返回的列表里' })
@@ -44,7 +44,7 @@ const modelSelectOptions = computed(() => {
               type="button"
               class="btn btn-ghost btn-sm"
               title="在弹窗里大屏编辑（Esc 关闭）"
-              @click="promptOpen = true"
+              @click="openPrompt()"
             >
               <AppIcon name="editSquare" :size="14" />
               大屏编辑
@@ -144,7 +144,7 @@ const modelSelectOptions = computed(() => {
                   <AppIcon name="refresh" :size="14" :class="modelsLoading ? 'animate-spin' : ''" />
                   {{ modelsLoading ? '获取中…' : '刷新列表' }}
                 </button>
-                <button type="button" class="btn btn-ghost btn-sm" @click="customModel = !customModel">
+                <button type="button" class="btn btn-ghost btn-sm" @click="toggleCustomModel()">
                   {{ customModel ? '从列表选择' : '手动输入' }}
                 </button>
               </div>
@@ -173,7 +173,7 @@ const modelSelectOptions = computed(() => {
             class="flex w-full cursor-pointer items-center justify-between gap-2 px-4 py-3 text-left"
             :aria-expanded="modelParamsOpen"
             :title="modelParamsOpen ? '折叠模型参数' : '展开模型参数'"
-            @click="modelParamsOpen = !modelParamsOpen"
+            @click="toggleModelParams()"
           >
             <span class="flex items-center gap-2 text-sm font-medium text-slate-200">
               <AppIcon name="cpu" :size="14" class="text-sky-400" />
@@ -264,7 +264,7 @@ const modelSelectOptions = computed(() => {
       title="编辑系统提示词"
       subtitle="会作为 system 消息注入每次对话；这里只是放大编辑，仍需点「保存修改」才会提交"
       width="max-w-5xl"
-      @close="promptOpen = false"
+      @close="closePrompt()"
     >
       <textarea
         v-model="draft.system_prompt"
@@ -279,7 +279,7 @@ const modelSelectOptions = computed(() => {
         </span>
       </div>
       <template #footer>
-        <button type="button" class="btn" @click="promptOpen = false">完成</button>
+        <button type="button" class="btn" @click="closePrompt()">完成</button>
       </template>
     </ModalDialog>
   </div>
