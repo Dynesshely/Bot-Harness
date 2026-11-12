@@ -58,6 +58,11 @@ QQ 平台              │                                                      
 
 关键点：**两个事件通道在 `dispatcher` 处汇合**，所以无论走 WebSocket 还是 Webhook，去重、限流、上下文、回复路径完全一致；同时开启时，同一事件的第二次到达会被 `msg_id` 幂等丢弃。
 
+> **0.4.x 的内部变化**：拓扑仍是单进程，没有拆服务。`internal/core` 多了 join gate、消息防抖、
+> 人味 / 分段 / 口吻、情绪与表达方式管线；`internal/ai` 多了 OpenAI 兼容 `/embeddings`；
+> `internal/store` 多了 expression / affect / join 决策数据。表达库的学习与召回复用同一条
+> `core → ai → store` 路径，不引入独立向量服务。
+
 ## 4. 关键设计
 
 ### 4.1 事件接入

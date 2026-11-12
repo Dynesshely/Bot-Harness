@@ -125,10 +125,11 @@ go run ./cmd/bot-harness
 ```text
 QQ 开放平台 ── WS / Webhook ──▶ internal/qq ──▶ internal/core ──▶ internal/ai ──▶ OpenAI 兼容端点
                                                    │
-                                                   ├─ internal/store   (PostgreSQL / SQLite)
+                                                   ├─ internal/store   (PostgreSQL / SQLite；expressions / affect / join 数据)
                                                    ├─ internal/tools   (工具循环、SSRF 防线、run_shell)
                                                    ├─ internal/render  (表格 PNG、内嵌字体)
-                                                   └─ core/*           (记忆、承诺、主动消息、人类状态、表达库)
+                                                   ├─ internal/ai      (chat / embeddings)
+                                                   └─ core/*           (join gate、防抖、人味、表达库、记忆、承诺、主动、情绪)
 
 浏览器 ── HTTP + SSE ──▶ internal/admin ──▶ internal/core
                           └─ go:embed web/dist（Vue 3 SPA）
@@ -137,6 +138,7 @@ QQ 开放平台 ── WS / Webhook ──▶ internal/qq ──▶ internal/cor
 - **单进程装配**：`cmd/bot-harness` 读引导配置、开库、装配 QQ / AI / 存储 / 后台，再启动 HTTP 与事件循环。
 - **唯一配置写入路径**：后台、Bot 命令与 `settings_write` 工具都走 `internal/settings`，不存在两套配置。
 - **出站安全**：`internal/httpx` 统一出站 TLS（可追加自定义 CA）；`internal/tools` 做 SSRF 地址策略。
+- **拓扑未变，职责变厚**：内化 MaiBot 后仍是单进程；新增的是 core 的会话决策 / 人味 / 表达层，以及 ai 的 embedding 与 store 的表达、情绪、加入决策数据。
 - **部署形态**：容器以非 root 用户运行；只暴露一个 HTTP 端口；PostgreSQL 与 SearxNG 不发布宿主端口。
 
 ---
@@ -410,6 +412,6 @@ curl -s -H "Authorization: Bearer <token>" localhost:8080/api/status
 
 <p align="center">
   <a href="https://star-history.com/#Dynesshely/Bot-Harness&Date">
-    <img alt="Star History" src="https://api.star-history.com/svg?repos=Dynesshely/Bot-Harness&type=Date">
+    <img alt="Star History" src="https://api.star-history.com/svg?repos=Dynesshely/Bot-Harness&type=Date&theme=dark">
   </a>
 </p>
