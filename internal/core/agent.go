@@ -86,9 +86,8 @@ func (d *Dispatcher) converse(ctx context.Context, in *Inbound, s settings.Setti
 	deadline := time.Now().Add(time.Duration(s.ToolsTotalBudgetSeconds) * time.Second)
 
 	var (
-		outcome           modelOutcome
-		steps             []toolStep
-		completionRetries int
+		outcome modelOutcome
+		steps   []toolStep
 	)
 	for step := 0; ; step++ {
 		req := ai.ChatRequest{
@@ -156,8 +155,7 @@ func (d *Dispatcher) converse(ctx context.Context, in *Inbound, s settings.Setti
 		if len(out.result.ToolCalls) == 0 {
 			// 推理模型可能把预算花在 reasoning 上，导致 content 在句子中间停止。
 			// 只重试一次，且用更大的输出预算；不改用户配置。
-			if completionRetries == 0 && needsCompletion(out.result) {
-				completionRetries++
+			if needsCompletion(out.result) {
 				d.log.Warn("reply looks truncated, retrying with a larger budget",
 					"component", "ai", "chars", len([]rune(out.result.Text)),
 					"finish_reason", out.result.FinishReason,
