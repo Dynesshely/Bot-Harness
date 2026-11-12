@@ -318,6 +318,7 @@ go build -o bot-harness ./cmd/bot-harness
 | 每轮按概率临时换一种说话风格 | `reply_style_variants` + `reply_style_variant_probability` | 空（不启用）/ 0.25 |
 | 同一群的未 @ 连续消息先攒一个窗口，只让第一条跑模型 | `reply_debounce_mode`（`off` / `fast` / `natural` / `steady`）+ `reply_debounce_quiet_seconds` / `reply_debounce_active_seconds`（0–15） | natural / 2 秒 / 5 秒 |
 | 从真实群聊学习「什么情境怎么说」，按向量召回后注入回复 | `expression_enabled` + `expression_mode`（`fast` / `precise`）+ 向量模型/召回/注入/学习/审核/全局共享（见 §5.18） | 关 / fast |
+| 每轮告诉模型当前场景与群/用户 OpenID，管理员说「本群设置」时能直接用 | 内置行为（无开关） | 开 |
 
 **提前回复的工作方式**：群聊不支持流式，长回答会让用户干等。开启后，模型超过 3 秒仍未产出时，
 先用**被动回复**发一句「有点复杂，让我多想会儿～稍后直接把答案发给你」；等模型给出结果，
@@ -1474,7 +1475,7 @@ QQBOT_LIVE_TEST=1 ENV_FILE=../../.env go test ./internal/e2e -run TestLivePipeli
 
 ## 11. 版本与兼容性
 
-当前版本 **0.4.0**，变更记录见 [CHANGELOG.md](CHANGELOG.md)。`0.x` 阶段不承诺 API 完全冻结，
+当前版本 **0.4.1**，变更记录见 [CHANGELOG.md](CHANGELOG.md)。`0.x` 阶段不承诺 API 完全冻结，
 但会遵循 SemVer：破坏性变更进 minor，并写清迁移步骤。
 
 | 项 | 要求 / 说明 |

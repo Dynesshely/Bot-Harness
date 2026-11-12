@@ -240,6 +240,11 @@ bash scripts/restore-pg.sh ~/bot-harness-backups/bot-<UTC 时间戳>            
     改这条路径要补：学习 JSON 解析/去重/超长、fast 加权、precise 排序、失败回退、
     跨群隔离、开关关闭零变化。
 
+25. **systemPrompt 必须带当前会话身份**（`internal/core/context.go` 的 `sessionIdentityBlock`）：
+    群聊注入 `group_openid`，私聊注入 `user_openid`；没有 id 时整块省略，不能输出空键。
+    这样管理员说「把本群的触发模式改成仅 @」时，模型能把正确的 id 交给
+    `settings_read` / `settings_write`，不必反问或猜。别把成员的私聊 OpenID 注入群聊。
+
 ## 3. 修改配置项
 
 `internal/settings` 是运行期配置的唯一入口。新增一个键的完整顺序：

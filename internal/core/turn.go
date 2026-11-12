@@ -68,6 +68,10 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 
 	userText := in.Content
 	systemPrompt := d.promptFor(s, cfg)
+	// 当前会话标识：管理员说「本群」时，模型需要知道实际的 OpenID。
+	if identityBlock := sessionIdentityBlock(in); identityBlock != "" {
+		systemPrompt = appendSystemBlock(systemPrompt, identityBlock)
+	}
 	// 表达方式库：只在本群范围内召回，注入位置在人设/口吻之后、记忆之前。
 	if block := d.expressionBlock(ctx, in, s, userText); block != "" {
 		systemPrompt = appendSystemBlock(systemPrompt, block)

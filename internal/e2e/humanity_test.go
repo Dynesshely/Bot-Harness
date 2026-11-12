@@ -80,6 +80,8 @@ func TestHumanizeBubblesSplitLongReply(t *testing.T) {
 	h.mu.Lock()
 	h.aiReply = "第一句话讲背景。第二句话讲原因。第三句话给结论。第四句话补充说明。"
 	h.mu.Unlock()
+	// 拆分本身是概率的：测试要的是「拆开后发送正确」，所以把随机源钉成必拆。
+	h.dis.SetSplitRoll(func() float64 { return 0 })
 
 	h.dis.HandlePayload(context.Background(), groupAtMessage("BB1", "G1", "U1", "小明", "说说看"))
 	sent := h.waitForSent(t, 2)

@@ -28,6 +28,14 @@
 - `web/package.json`：公开包（`private: false`）、Apache-2.0、版本 `0.1.0`、仓库地址、
   锁定 `pnpm@11.25.0`。
 
+## [0.4.1] - 2026-11-12
+
+### Added
+
+- systemPrompt 注入当前会话身份：群聊带 `group_openid`，私聊带 `user_openid`。管理员在聊天里
+  说「把本群设置改成…」时，模型能直接把正确 id 交给 `settings_read` / `settings_write`，
+  不再反问或猜错群。id 缺失时整块省略，群聊不注入成员私聊 OpenID。
+
 ## [0.4.0] - 2026-11-12
 
 ### Added
@@ -39,6 +47,9 @@
   - 只召回本群 + 全局，默认不跨群；注入位置在人设/口吻之后、记忆之前；
   - 新增 `expressions` 表（SQLite + PostgreSQL，迁移 0015）、后台「表达方式」页与 9 个配置键；
   - 召回+选择总预算 2 秒，学习异步，任何失败都不影响回复。
+- **会话身份注入**：每轮 systemPrompt 带上「当前场景 + 群 OpenID / 用户 OpenID」，
+  管理员说「本群」时模型能直接把正确的 id 交给 `settings_read` / `settings_write`，
+  不用反问或猜。群聊注入 `group_openid`，私聊注入 `user_openid`；缺失时不输出空键。
 
 ## [0.3.2] - 2026-11-11
 
