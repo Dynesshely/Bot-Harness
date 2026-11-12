@@ -67,7 +67,7 @@
 
 | 模块 | 能力 |
 |---|---|
-| **对话与群聊** | 触发模式（仅 @ / 全量）· 上下文（每人 / 整群、未 @ 是否入模）· 自主加入三分类 + 话题生命周期 · 群消息合并 · 分段气泡 · 逐段打字 · 多机器人共存 |
+| **对话与群聊** | 触发模式（仅 @ / 全量）· 上下文（每人 / 整群、未 @ 是否入模）· 自主加入三分类 + 话题生命周期 · 群消息合并 · 分段气泡 · 逐段打字 · 长会话自动压缩 · 多机器人共存 |
 | **人味与表达** | 两阶段生成（草稿 → 润色）· 人味档位 · 提前安抚 · 概率引用 · 口吻轮换 · 表达方式库（学习 → 召回 → 语境选择 → 注入）· 情绪状态（默认关）· 人类状态感知（默认开） |
 | **能力与工具** | 图片理解（当前 / 引用 / 合并）· 联网搜索（SearxNG）· 受控 shell（默认关）· 长期记忆 · 定时任务 · 承诺追问 · 主动消息 |
 | **运行与运维** | PostgreSQL / SQLite · 完整后台 + REST/SSE · 配置落库即时生效 · 单容器 · 健康检查 / 审计 / 计数器 / 日志 |
@@ -125,11 +125,11 @@ go run ./cmd/bot-harness
 ```text
 QQ 开放平台 ── WS / Webhook ──▶ internal/qq ──▶ internal/core ──▶ internal/ai ──▶ OpenAI 兼容端点
                                                    │
-                                                   ├─ internal/store   (PostgreSQL / SQLite；expressions / affect / join 数据)
+                                                   ├─ internal/store   (PostgreSQL / SQLite；summaries / expressions / affect / join 数据)
                                                    ├─ internal/tools   (工具循环、SSRF 防线、run_shell)
                                                    ├─ internal/render  (表格 PNG、内嵌字体)
                                                    ├─ internal/ai      (chat / embeddings)
-                                                   └─ core/*           (join gate、防抖、人味、表达库、记忆、承诺、主动、情绪)
+                                                   └─ core/*           (join gate、防抖、人味、表达库、compact、记忆、承诺、主动、情绪)
 
 浏览器 ── HTTP + SSE ──▶ internal/admin ──▶ internal/core
                           └─ go:embed web/dist（Vue 3 SPA）
@@ -179,6 +179,12 @@ closed 不旧事重提；上次话题以 8 条 / 500 rune 回灌，避免重复�
   每批硬上限 20 秒。@、引用机器人、命令零延迟。
 - **气泡**：长回复按标点概率拆成 1–3 条；代码块、URL、引用块不拆；引用只挂第一条。
 - **打字**：每条气泡前按字数等待（中文 0.3s/字 × 延迟系数，默认 0.5；英文减半），整轮上限 12 秒并扣除模型耗时。
+
+### 长会话自动压缩（compact）
+
+历史超过预算或加载窗口时，后台把最旧的一批消息压缩成滚动摘要，下一轮使用「摘要 + 最近 200 条原文」。
+原消息不删除，时间线与审计不变；压缩失败只记 WARN，不影响回复。
+默认上下文上限可按部署配置放大（当前实例 1,000,000 tokens）。
 
 ### 引用机器人 = 被寻址
 
