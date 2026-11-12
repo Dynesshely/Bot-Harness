@@ -79,6 +79,9 @@ type harness struct {
 	// aiReasoningOnly makes the fake provider imitate a reasoning model that
 	// burns its whole budget thinking and never writes a final answer.
 	aiReasoningOnly bool
+	// aiTruncateOnce makes the next main completion end mid-sentence with
+	// finish_reason=length; the retry then returns the full reply.
+	aiTruncateOnce bool
 	// aiBaseURL is the fake upstream the harness seeds into the database
 	// settings (the endpoint no longer comes from .env).
 	aiBaseURL string
@@ -120,6 +123,8 @@ type harness struct {
 	// the calls apart by the system message: only the polish call carries the
 	// polisher instruction, so no extra routing state is needed.
 	polishReply string
+	// polishFinishReason lets a test make stage 2 end with finish_reason=length.
+	polishFinishReason string
 	// polishStatus, when non-zero, makes stage 2 fail with that HTTP status.
 	polishStatus int
 	// polishEmpty makes stage 2 answer with a blank completion.
@@ -239,6 +244,10 @@ func newHarness(t *testing.T) *harness {
 		reply := h.aiReply
 		delay := h.aiDelay
 		reasoningOnly := h.aiReasoningOnly
+		truncate := h.aiTruncateOnce
+		if truncate {
+			h.aiTruncateOnce = false
+		}
 		streaming, _ := body["stream"].(bool)
 		h.mu.Unlock()
 
@@ -445,10 +454,18 @@ func newHarness(t *testing.T) *harness {
 				`{"model":"test-model","choices":[{"message":{"content":"","reasoning_content":"%s"},"finish_reason":"stop"}]}`, cot)
 			return
 		}
+		finishReason := "stop"
+		if truncate {
+			runes := []rune(reply)
+			if len(runes) > 20 {
+				reply = string(runes[:20])
+			}
+			finishReason = "length"
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		payload, _ := json.Marshal(map[string]any{
 			"model":   "test-model",
-			"choices": []map[string]any{{"delta": map[string]string{"content": reply}, "finish_reason": "stop"}},
+			"choices": []map[string]any{{"delta": map[string]string{"content": reply}, "finish_reason": finishReason}},
 			"usage":   map[string]int{"total_tokens": 7},
 		})
 		_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", payload)
@@ -762,6 +779,7 @@ func (h *harness) servePolish(w http.ResponseWriter, body map[string]any, stream
 	h.mu.Lock()
 	h.polishCalls = append(h.polishCalls, body)
 	reply := h.polishReply
+	finishReason := h.polishFinishReason
 	status := h.polishStatus
 	empty := h.polishEmpty
 	delay := h.polishDelay
@@ -791,11 +809,14 @@ func (h *harness) servePolish(w http.ResponseWriter, body map[string]any, stream
 		_, _ = w.Write([]byte(`{"model":"polish-model","choices":[{"message":{"content":""},"finish_reason":"stop"}]}`))
 		return
 	}
+	if finishReason == "" {
+		finishReason = "stop"
+	}
 	if streaming {
 		w.Header().Set("Content-Type", "text/event-stream")
 		payload, _ := json.Marshal(map[string]any{
 			"model":   "polish-model",
-			"choices": []map[string]any{{"delta": map[string]string{"content": reply}, "finish_reason": "stop"}},
+			"choices": []map[string]any{{"delta": map[string]string{"content": reply}, "finish_reason": finishReason}},
 			"usage":   map[string]int{"total_tokens": 5},
 		})
 		_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", payload)
@@ -809,7 +830,7 @@ func (h *harness) servePolish(w http.ResponseWriter, body map[string]any, stream
 		"model": "polish-model",
 		"choices": []map[string]any{{
 			"message":       map[string]string{"content": reply},
-			"finish_reason": "stop",
+			"finish_reason": finishReason,
 		}},
 		"usage": map[string]int{"total_tokens": 5},
 	})
