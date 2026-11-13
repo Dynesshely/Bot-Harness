@@ -4,7 +4,7 @@
   <a href="https://github.com/Dynesshely/Bot-Harness/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Dynesshely/Bot-Harness/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
   <a href="go.mod"><img alt="Go" src="https://img.shields.io/badge/go-1.27%2B-00ADD8.svg"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.6-7c3aed.svg">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.7-7c3aed.svg">
 </p>
 
 <h1 align="center">Bot Harness</h1>
@@ -396,7 +396,7 @@ curl -s -H "Authorization: Bearer <token>" localhost:8080/api/status
 
 ## 版本与兼容
 
-当前版本 **0.4.6**。`0.x` 阶段 API 与配置键可能继续演进；破坏性变更会写入
+当前版本 **0.4.7**。`0.x` 阶段 API 与配置键可能继续演进；破坏性变更会写入
 [CHANGELOG.md](CHANGELOG.md) 与 [docs/DECISIONS.md](docs/DECISIONS.md)。
 
 - 完整变更：[CHANGELOG.md](CHANGELOG.md)

@@ -1,6 +1,6 @@
 {
   "name": "bot-harness-admin",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "private": false,
   "type": "module",
   "description": "Bot Harness Web 管理后台（Vue 3 + Vite + Tailwind CSS v4）",

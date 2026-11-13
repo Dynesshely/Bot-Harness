@@ -76,7 +76,7 @@ func New(deps Deps) *Server {
 	return s
 }
 
-func (s *Server) Handler() http.Handler { return s.mux }
+func (s *Server) Handler() http.Handler { return s.securityHeaders(s.mux) }
 
 func (s *Server) routes() {
 	// Public endpoints.

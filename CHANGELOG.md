@@ -28,6 +28,14 @@
 - `web/package.json`：公开包（`private: false`）、Apache-2.0、版本 `0.1.0`、仓库地址、
   锁定 `pnpm@11.25.0`。
 
+## [0.4.7] - 2026-11-13
+
+### Security
+
+- Admin 响应统一加 Content-Security-Policy、X-Frame-Options、nosniff、Referrer-Policy、
+  Permissions-Policy；API 响应加 Cache-Control: no-store；
+- 状态变更请求校验 Origin/Referer/Sec-Fetch-Site，拒绝跨站写请求（Bearer/无 Origin 的 CLI 不受影响）。
+
 ## [0.4.6] - 2026-11-13
 
 ### Fixed
