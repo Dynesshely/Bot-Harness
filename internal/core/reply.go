@@ -46,7 +46,7 @@ type modelOutcome struct {
 // group and `since` is when the inbound message arrived: the pause is measured
 // against the whole turn, so a slow model is not delayed a second time.
 func (d *Dispatcher) deliver(ctx context.Context, in *Inbound, s settings.Settings, text string,
-	forceActive bool, quoteIndex, level string, since time.Time) (*qq.SendResult, error) {
+	forceActive bool, startSeq int, quoteIndex, level string, since time.Time) (*qq.SendResult, error) {
 
 	if pause := humanizeDelayForTurn(level, len([]rune(text)), s.HumanizeDelayScale, time.Since(since)); pause > 0 {
 		d.log.Debug("humanize pause", "component", "humanize", "level", level,
@@ -63,6 +63,7 @@ func (d *Dispatcher) deliver(ctx context.Context, in *Inbound, s settings.Settin
 		Markdown:     s.MarkdownEnabled,
 		MaxChars:     s.ReplyMaxChars,
 		MaxSegments:  s.ReplyMaxSegments,
+		StartSeq:     startSeq,
 		SegmentPause: segmentPause(level, s.HumanizeDelayScale),
 		// 气泡等待优先：BubblePause 非空时 sender 用它，SegmentPause 只在
 		// 「单个气泡仍超长、被 sender 二次切开」时兜底，保证节奏一致。
@@ -208,8 +209,9 @@ func (d *Dispatcher) sendEarlyNotice(ctx context.Context, in *Inbound, s setting
 		Status:         "early_reply",
 		Scene:          in.Scene,
 		ConversationID: convID,
-		// The acknowledgement is always an active message.
-		Delivery: store.DeliveryActive,
+		// The acknowledgement is a passive reply; the final answer uses the
+		// remaining passive slots before falling back to active.
+		Delivery: store.DeliveryPassive,
 	}
 	if id, err := d.st.AddRecord(sendCtx, rec); err == nil {
 		rec.ID = id

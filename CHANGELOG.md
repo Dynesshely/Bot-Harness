@@ -28,6 +28,13 @@
 - `web/package.json`：公开包（`private: false`）、Apache-2.0、版本 `0.1.0`、仓库地址、
   锁定 `pnpm@11.25.0`。
 
+## [0.4.6] - 2026-11-13
+
+### Fixed
+
+- **early reply 复用剩余 passive 槽位**：`SendOptions.StartSeq` 让正式答复从 `msg_seq=2` 开始，
+  不再把大多数回答强制改成主动消息；被动槽位耗尽时才降级主动。引用仍挂在正式答复的第一段。
+
 ## [0.4.5] - 2026-11-13
 
 ### Fixed

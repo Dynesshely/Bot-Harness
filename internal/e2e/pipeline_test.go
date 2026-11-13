@@ -1310,7 +1310,7 @@ func TestReplyFooterCarriesTimeAndTokens(t *testing.T) {
 	}
 }
 
-func TestSlowModelTriggersEarlyReplyThenActiveAnswer(t *testing.T) {
+func TestSlowModelTriggersEarlyReplyThenPassiveAnswer(t *testing.T) {
 	h := newHarness(t)
 	h.mu.Lock()
 	h.aiDelay = 1500 * time.Millisecond
@@ -1336,8 +1336,8 @@ func TestSlowModelTriggersEarlyReplyThenActiveAnswer(t *testing.T) {
 	}
 
 	answer := sent[1]
-	if answer.Body.MsgID != "" {
-		t.Fatalf("the real answer must be an active message, got msg_id %q", answer.Body.MsgID)
+	if answer.Body.MsgID != "SLOW1" || answer.Body.MsgSeq != 2 {
+		t.Fatalf("the real answer must reuse passive seq=2: msg_id=%q msg_seq=%d", answer.Body.MsgID, answer.Body.MsgSeq)
 	}
 	if !strings.HasPrefix(answer.Body.Content, "这是测试回复。") {
 		t.Fatalf("unexpected answer text %q", answer.Body.Content)

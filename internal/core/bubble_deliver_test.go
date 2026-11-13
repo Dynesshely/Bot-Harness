@@ -98,7 +98,7 @@ func TestDeliverOffSendsOneMessageWithoutTypingWait(t *testing.T) {
 
 	in := &Inbound{Scene: "group", AtBot: true, GroupOpenID: "G1", MsgID: "MSG-IN"}
 	start := time.Now()
-	res, err := d.deliver(context.Background(), in, s, text, false, "", HumanizeOff, time.Now())
+	res, err := d.deliver(context.Background(), in, s, text, false, 0, "", HumanizeOff, time.Now())
 	if err != nil {
 		t.Fatalf("deliver: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestDeliverSplitsLongReplyAndQuotesTheFirstBubble(t *testing.T) {
 	text := "第一句话讲背景。第二句话讲原因。第三句话给结论。第四句话补充说明。"
 
 	in := &Inbound{Scene: "group", AtBot: true, GroupOpenID: "G1", MsgID: "MSG-IN"}
-	res, err := d.deliver(context.Background(), in, s, text, false, "REFIDX_IN", HumanizeMedium, time.Now())
+	res, err := d.deliver(context.Background(), in, s, text, false, 0, "REFIDX_IN", HumanizeMedium, time.Now())
 	if err != nil {
 		t.Fatalf("deliver: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestDeliverTypingWaitStaysWithinBudget(t *testing.T) {
 
 	in := &Inbound{Scene: "group", AtBot: true, GroupOpenID: "G1", MsgID: "MSG-IN"}
 	start := time.Now()
-	if _, err := d.deliver(context.Background(), in, s, text, false, "", HumanizeMedium, time.Now()); err != nil {
+	if _, err := d.deliver(context.Background(), in, s, text, false, 0, "", HumanizeMedium, time.Now()); err != nil {
 		t.Fatalf("deliver: %v", err)
 	}
 	// humanize 的读题停顿 + 1s 打字预算；这里只验证不会远远超预算。
@@ -195,7 +195,7 @@ func TestDeliverStopsWhenALaterBubbleFails(t *testing.T) {
 	text := "第一句话讲背景。第二句话讲原因。第三句话给结论。第四句话补充说明。"
 
 	in := &Inbound{Scene: "group", AtBot: true, GroupOpenID: "G1", MsgID: "MSG-IN"}
-	res, err := d.deliver(context.Background(), in, s, text, false, "", HumanizeMedium, time.Now())
+	res, err := d.deliver(context.Background(), in, s, text, false, 0, "", HumanizeMedium, time.Now())
 	if err == nil {
 		t.Fatal("第二条失败时应返回错误")
 	}
@@ -224,7 +224,7 @@ func TestDeliverStopsWhenContextCancelled(t *testing.T) {
 	}()
 
 	in := &Inbound{Scene: "group", AtBot: true, GroupOpenID: "G1", MsgID: "MSG-IN"}
-	_, err := d.deliver(ctx, in, s, text, false, "", HumanizeMedium, time.Now())
+	_, err := d.deliver(ctx, in, s, text, false, 0, "", HumanizeMedium, time.Now())
 	if err == nil {
 		t.Fatal("ctx 取消后应返回错误")
 	}
