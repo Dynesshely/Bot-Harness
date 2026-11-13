@@ -67,7 +67,8 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	if sumErr != nil {
 		d.log.Debug("failed to load context summary", "component", "compact", "error", sumErr.Error())
 	} else if summary.ThroughMessageID > 0 {
-		history, err = d.st.MessagesAfter(ctx, conv.ID, summary.ThroughMessageID, historyLimit(s))
+		history, err = d.st.MessagesAfter(ctx, conv.ID, summary.ThroughMessageID, historyLimit(s),
+			cfg.ContextScope == settings.ContextIncludeUnaddressed)
 		if err != nil {
 			d.log.Warn("failed to load messages after summary", "component", "store", "error", err.Error())
 		}
@@ -358,7 +359,7 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	// 表达方式学习同样异步、best-effort，失败不影响这一轮。
 	d.learnExpressions(ctx, conv.ID, in, s, userText, sentText)
 	// 旧的上下文在后台压缩；不阻塞这一轮，也不删除原消息。
-	d.startCompaction(conv.ID, s)
+	d.startCompaction(conv.ID, s, cfg.ContextScope == settings.ContextIncludeUnaddressed)
 	d.finishRecord(rec, "replied", "", latency)
 }
 

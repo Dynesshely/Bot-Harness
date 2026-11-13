@@ -301,10 +301,7 @@ func describeGroups(entries []any) string {
 // ever written, never read back. Whether one exists is reported separately via
 // the matching *_set flags (see handleGetConfig).
 func maskSecrets(s settings.Settings) settings.Settings {
-	s.OpenAIAPIKey = ""
-	s.QQAppSecret = ""
-	s.AdminToken = ""
-	return s
+	return settings.MaskSecrets(s)
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, _ *http.Request) {

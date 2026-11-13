@@ -163,7 +163,7 @@ func (d *Dispatcher) selectExpressions(ctx context.Context, s settings.Settings,
 
 	callCtx, cancel := context.WithTimeout(ctx, expressionSelectTimeout)
 	defer cancel()
-	res, err := d.ai.Chat(callCtx, ai.ChatRequest{
+	res, err := d.backgroundChat(callCtx, ai.ChatRequest{
 		Model: s.Model, Messages: []ai.Message{{Role: ai.RoleUser, Content: b.String()}},
 		Temperature: 0, MaxTokens: 120, Stream: false,
 	})
@@ -288,7 +288,7 @@ func (d *Dispatcher) learnExpressions(ctx context.Context, conversationID string
 		fmt.Fprintf(&b, "群友：%s\n你：%s", truncateRunes(userText, 1200), truncateRunes(reply, 1200))
 		input := truncateRunes(b.String(), expressionContextRunes)
 
-		res, err := d.ai.Chat(runCtx, ai.ChatRequest{
+		res, err := d.backgroundChat(runCtx, ai.ChatRequest{
 			Model: s.Model,
 			Messages: []ai.Message{{Role: ai.RoleSystem, Content: expressionLearnPrompt},
 				{Role: ai.RoleUser, Content: input}},

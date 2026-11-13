@@ -56,7 +56,7 @@ func TestCompactOnceSummarizesOldest(t *testing.T) {
 		ai:  ai.NewClient(upstream.URL+"/v1", "test-key", upstream.Client()),
 		log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
-	if err := d.compactOnce(ctx, conv.ID, s); err != nil {
+	if err := d.compactOnce(ctx, conv.ID, s, false); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 	sum, err := st.GetConversationSummary(ctx, conv.ID)
@@ -66,7 +66,7 @@ func TestCompactOnceSummarizesOldest(t *testing.T) {
 	if sum.ThroughMessageID != ids[9] {
 		t.Fatalf("through id = %d, want %d", sum.ThroughMessageID, ids[9])
 	}
-	msgs, err := st.MessagesAfter(ctx, conv.ID, 0, 500)
+	msgs, err := st.MessagesAfter(ctx, conv.ID, 0, 500, false)
 	if err != nil || len(msgs) != n {
 		t.Fatalf("original messages must stay: len=%d err=%v", len(msgs), err)
 	}
@@ -92,3 +92,48 @@ func containsAll(s string, parts ...string) bool {
 }
 
 func stringsContains(s, sub string) bool { return strings.Contains(s, sub) }
+
+// 首条超长（合并转发）不能让游标永久卡住；即使只能摘要一条，也必须前进。
+func TestCompactAdvancesPastOversizedFirstMessage(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"超长消息摘要"},"finish_reason":"stop"}]}`)
+	}))
+	defer upstream.Close()
+
+	st, err := store.Open(t.TempDir() + "/oversize.db")
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	conv := &store.Conversation{ID: "group:G9:U9", Scene: "group", GroupOpenID: "G9"}
+	if err := st.EnsureConversation(ctx, conv); err != nil {
+		t.Fatal(err)
+	}
+	first, err := st.AppendMessageID(ctx, store.MessageInput{ConversationID: conv.ID, Role: "user", Content: strings.Repeat("超长", 10000), Kind: store.KindDialogue})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 210; i++ {
+		if _, err := st.AppendMessageID(ctx, store.MessageInput{ConversationID: conv.ID, Role: "user", Content: "后面", Kind: store.KindDialogue}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := settings.Defaults()
+	s.Model = "test-model"
+	s.MaxTokens = 100
+	s.ContextMaxTokens = 1000
+	s.ContextMaxTurns = 600
+	d := &Dispatcher{st: st, ai: ai.NewClient(upstream.URL+"/v1", "k", upstream.Client()), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	if err := d.compactOnce(ctx, conv.ID, s, false); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	sum, err := st.GetConversationSummary(ctx, conv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.ThroughMessageID == 0 || sum.ThroughMessageID < first {
+		t.Fatalf("cursor did not advance: %+v (first=%d)", sum, first)
+	}
+}

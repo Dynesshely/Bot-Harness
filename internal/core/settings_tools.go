@@ -16,6 +16,8 @@ import (
 // the admin panel.
 var settingsDeniedKeys = map[string]string{
 	"openai_api_key": "密钥不通过聊天修改，请到「系统设置」里填",
+	"qq_app_secret":  "QQ Secret 不通过聊天修改，请到「接入与运维」里填",
+	"admin_token":    "后台口令不通过聊天修改，请到「接入与运维」里改，避免被提示词注入锁定",
 	"admin_openids":  "管理员名单不通过聊天修改（防止一条消息就把别人提权），请到「策略配置」里改",
 }
 
@@ -50,10 +52,9 @@ func (t *settingsReadTool) Run(_ context.Context, _ json.RawMessage, env *tools.
 	return tools.Result{Text: renderSettings(t.mgr.Get())}, nil
 }
 
-// renderSettings marshals the effective settings with the secret blanked.
+// renderSettings marshals the effective settings with every secret blanked.
 func renderSettings(s settings.Settings) string {
-	s.OpenAIAPIKey = ""
-	safe := s
+	safe := settings.MaskSecrets(s)
 	raw, err := json.MarshalIndent(safe, "", "  ")
 	if err != nil {
 		return "（无法序列化配置）"
@@ -137,6 +138,11 @@ func describeDiff(before, after settings.Settings) string {
 	_ = json.Unmarshal(b, &beforeMap)
 	_ = json.Unmarshal(a, &afterMap)
 	for _, key := range keys {
+		// Secrets must never be echoed by a diff, even when they changed.
+		switch key {
+		case "openai_api_key", "qq_app_secret", "admin_token":
+			continue
+		}
 		bv, av := beforeMap[key], afterMap[key]
 		if fmt.Sprint(bv) == fmt.Sprint(av) {
 			continue

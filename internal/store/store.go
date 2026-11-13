@@ -994,6 +994,11 @@ func (s *Store) ClearConversationMessages(ctx context.Context, id string) error 
 	if _, err := s.execContext(ctx, `DELETE FROM messages WHERE conversation_id = ?`, id); err != nil {
 		return err
 	}
+	// The rolling summary is derived from the messages just deleted. Leaving it
+	// behind would make a "cleared" conversation keep influencing the model.
+	if _, err := s.execContext(ctx, `DELETE FROM conversation_summaries WHERE conversation_id = ?`, id); err != nil {
+		return err
+	}
 	// Affect rows are per-conversation and carry user-derived state; clearing a
 	// conversation must not leave them behind.
 	if err := s.ClearAffectForConversation(ctx, id); err != nil {
@@ -1012,6 +1017,9 @@ UPDATE conversations SET message_count = 0, turn_count = 0, token_estimate = 0 W
 // ClearAllConversations removes every conversation and message.
 func (s *Store) ClearAllConversations(ctx context.Context) error {
 	if _, err := s.execContext(ctx, `DELETE FROM messages`); err != nil {
+		return err
+	}
+	if _, err := s.execContext(ctx, `DELETE FROM conversation_summaries`); err != nil {
 		return err
 	}
 	if err := s.ClearAllAffect(ctx); err != nil {

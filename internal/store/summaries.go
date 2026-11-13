@@ -59,19 +59,26 @@ ON CONFLICT (conversation_id) DO UPDATE SET
 	return nil
 }
 
-// MessagesAfter returns up to limit context messages with id > afterID, in
-// chronological order. It is the read side of the compaction cursor; passing 0
-// reads from the start of the conversation.
-func (s *Store) MessagesAfter(ctx context.Context, conversationID string, afterID int64, limit int) ([]Message, error) {
+// MessagesAfter returns up to limit of the NEWEST context messages with id >
+// afterID, in chronological order. The previous ASC LIMIT returned the oldest
+// window after the cursor, which made the model miss its own latest turns once
+// a summary existed.
+func (s *Store) MessagesAfter(ctx context.Context, conversationID string, afterID int64, limit int, includeUnaddressed bool) ([]Message, error) {
 	if limit <= 0 || limit > 5000 {
 		limit = 2000
 	}
-	rows, err := s.queryContext(ctx, `
-SELECT id, role, content, tokens, kind, speaker, speaker_openid, quote_index, attachments, created_at
-FROM messages
-WHERE conversation_id = ? AND id > ?
-ORDER BY id ASC
-LIMIT ?`, conversationID, afterID, limit)
+	kinds := []any{conversationID, afterID, KindDialogue, KindManual}
+	kindClause := "kind IN (?, ?)"
+	if includeUnaddressed {
+		kindClause = "kind IN (?, ?, ?, ?)"
+		kinds = []any{conversationID, afterID, KindDialogue, KindManual, KindObserved, KindObservedBot}
+	}
+	query := `SELECT id, role, content, tokens, kind, speaker, speaker_openid, quote_index, attachments, created_at FROM (
+  SELECT id, role, content, tokens, kind, speaker, speaker_openid, quote_index, attachments, created_at
+  FROM messages WHERE conversation_id = ? AND id > ? AND ` + kindClause + ` ORDER BY id DESC LIMIT ?
+) ORDER BY id ASC`
+	kinds = append(kinds, limit)
+	rows, err := s.queryContext(ctx, query, kinds...)
 	if err != nil {
 		return nil, err
 	}
