@@ -180,7 +180,13 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 
 	// Once the user has been told "let me think", the answer must arrive as an
 	// active message: the passive window may already be gone by then.
-	forceActive := outcome.earlySent
+	// The early notice already spent passive seq=1 on this msg_id. Prefer the
+	// remaining passive slots (2..5); only fall back to active when they run out.
+	forceActive := false
+	startSeq := 0
+	if outcome.earlySent {
+		startSeq = 1
+	}
 
 	if strings.TrimSpace(result.Reasoning) != "" {
 		// The scratchpad is dropped on purpose: it is only a signal that this
@@ -295,7 +301,7 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	// 行为参数只改**本轮副本**：上限、分段、人味节奏都跟着当下的状态走，
 	// 但绝不回写全局 settings。
 	deliverySettings, deliveryLevel := applyAffectBehavior(s, cfg, d.affectBehavior(ctx, conv.ID, time.Now(), cfg))
-	sendRes, sendErr := d.deliver(ctx, in, deliverySettings, deliverText, forceActive, quoteIndex,
+	sendRes, sendErr := d.deliver(ctx, in, deliverySettings, deliverText, forceActive, startSeq, quoteIndex,
 		deliveryLevel, start)
 	latency := elapsed.Milliseconds()
 	if sendErr == nil && sendRes != nil && sendRes.RefIdx != "" && assistantRowID > 0 {

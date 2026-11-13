@@ -36,6 +36,10 @@ type SendOptions struct {
 	GroupOpenID string // exactly one of GroupOpenID / UserOpenID is set
 	UserOpenID  string
 	MsgID       string // passive reply target; empty sends an active message
+	// StartSeq is the number of passive replies already spent on this msg_id
+	// (0 = none). The sender numbers its segments from StartSeq+1 and caps them
+	// at the platform's five-passive-reply limit.
+	StartSeq int
 	// QuoteMessageID makes the message a quoted reply. It is a platform
 	// reference index (REFIDX_…), not a message id: for a message somebody else
 	// sent it comes from the event's message_scene.ext[msg_idx], and for one of
@@ -84,11 +88,14 @@ func (s *Sender) Send(ctx context.Context, opts SendOptions, text string) (*Send
 	if maxSegments < 1 {
 		maxSegments = 3
 	}
-	if opts.MsgID != "" && maxSegments > 5 {
-		// A passive reply happens inside one msg_id, and the platform allows at
-		// most 5 replies per message. Active messages carry no such ceiling, so
-		// the cap only applies to the passive path.
-		maxSegments = 5
+	if opts.MsgID != "" {
+		remaining := 5 - opts.StartSeq
+		if remaining < 1 {
+			return &SendResult{}, ErrPassiveWindowClosed
+		}
+		if maxSegments > remaining {
+			maxSegments = remaining
+		}
 	}
 	if opts.MsgID == "" && maxSegments > 20 {
 		maxSegments = 20
@@ -144,7 +151,7 @@ func (s *Sender) Send(ctx context.Context, opts SendOptions, text string) (*Send
 			res.LatencyMS = time.Since(start).Milliseconds()
 			return res, err
 		}
-		req := s.buildRequest(opts, seg, i+1)
+		req := s.buildRequest(opts, seg, opts.StartSeq+i+1)
 
 		var (
 			resp *SendMessageResponse
@@ -271,7 +278,9 @@ func (s *Sender) buildRequest(opts SendOptions, text string, seq int) SendMessag
 		req.MsgID = opts.MsgID
 		req.MsgSeq = seq
 	}
-	if seq == 1 && opts.QuoteMessageID != "" {
+	// Quote belongs on the first segment of this delivery, whether that is
+	// seq=1 (no early notice) or seq=StartSeq+1 (after a notice).
+	if seq == opts.StartSeq+1 && opts.QuoteMessageID != "" {
 		req.MessageRef = &MessageRef{MessageID: opts.QuoteMessageID}
 	}
 	return req

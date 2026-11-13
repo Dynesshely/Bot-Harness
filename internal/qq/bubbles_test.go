@@ -219,3 +219,23 @@ func TestSendBubblesWaitsBetweenSegments(t *testing.T) {
 		t.Fatalf("两段等待合计约 70ms，实际只用 %v", elapsed)
 	}
 }
+
+// early reply 用掉 seq=1 后，正式答复必须从 seq=2 继续用 passive，
+// 而不是被强制改成主动消息。
+func TestSendBubblesResumesPassiveSequence(t *testing.T) {
+	p, sender := newBubblePlatform(t)
+	res, err := sender.Send(context.Background(), SendOptions{
+		GroupOpenID: "G1", MsgID: "MSG-IN", MaxChars: 200, StartSeq: 1,
+		Bubbles: []string{"第一段。", "第二段。"},
+	}, "第一段。第二段。")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if res.Segments != 2 || len(res.MessageIDs) != 2 {
+		t.Fatalf("segments=%d ids=%d", res.Segments, len(res.MessageIDs))
+	}
+	msgs := p.snapshot()
+	if len(msgs) != 2 || msgs[0].MsgSeq != 2 || msgs[1].MsgSeq != 3 {
+		t.Fatalf("msg_seq should start at 2: %+v", msgs)
+	}
+}
