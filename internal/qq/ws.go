@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -46,6 +47,11 @@ type WSClient struct {
 	// tlsConfig carries the optional extra CA bundle for the gateway.
 	tlsConfig *tls.Config
 
+	// dispatch queues keep slow message handlers off the websocket read loop.
+	// Sharding by group preserves per-group order without serializing all groups.
+	dispatch     []chan *Payload
+	dispatchOnce sync.Once
+
 	mu          sync.RWMutex
 	state       string
 	connected   bool
@@ -83,7 +89,7 @@ func NewWSClient(opts WSOptions) *WSClient {
 	if shards < 1 {
 		shards = 1
 	}
-	return &WSClient{
+	w := &WSClient{
 		client:         opts.Client,
 		intents:        opts.Intents,
 		shards:         shards,
@@ -92,8 +98,13 @@ func NewWSClient(opts WSOptions) *WSClient {
 		onState:        opts.OnState,
 		tlsConfig:      opts.TLSConfig,
 		forceReconnect: make(chan struct{}, 1),
+		dispatch:       make([]chan *Payload, wsDispatchShards),
 		state:          "idle",
 	}
+	for i := range w.dispatch {
+		w.dispatch[i] = make(chan *Payload, wsDispatchQueue)
+	}
+	return w
 }
 
 // Ready returns a channel closed after the first successful READY.
@@ -154,6 +165,7 @@ func (w *WSClient) setError(err error) {
 
 // Run keeps a gateway connection alive until ctx is cancelled.
 func (w *WSClient) Run(ctx context.Context) {
+	w.startDispatch(ctx)
 	const (
 		minBackoff = time.Second
 		maxBackoff = 60 * time.Second
@@ -491,8 +503,82 @@ func (w *WSClient) handleDispatch(ctx context.Context, p *Payload, resuming bool
 		w.setState("ready", true)
 	}
 
-	if w.handler != nil {
-		w.handler(ctx, p)
+	if w.handler == nil {
+		return
+	}
+	idx := int(fnv32(dispatchKey(p)) % uint32(len(w.dispatch)))
+	select {
+	case w.dispatch[idx] <- p:
+	default:
+		// Never block the gateway read loop: a stalled handler must not stop
+		// heartbeats or every other group. Drop is logged; the dispatcher's
+		// msg_id dedup cannot recover it, so keep the queue generous.
+		w.log.Warn("websocket dispatch queue full; dropping event",
+			"component", "ws", "shard", idx, "event", p.T, "id", p.ID)
+	}
+}
+
+const (
+	wsDispatchShards = 8
+	wsDispatchQueue  = 128
+)
+
+func (w *WSClient) startDispatch(ctx context.Context) {
+	w.dispatchOnce.Do(func() {
+		for i := range w.dispatch {
+			go w.dispatchLoop(ctx, w.dispatch[i])
+		}
+	})
+}
+
+func (w *WSClient) dispatchLoop(ctx context.Context, ch <-chan *Payload) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case p := <-ch:
+			if p == nil {
+				return
+			}
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						w.log.Error("websocket handler panic", "component", "ws", "panic", fmt.Sprint(r))
+					}
+				}()
+				w.handler(ctx, p)
+			}()
+		}
+	}
+}
+
+func fnv32(s string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s))
+	return h.Sum32()
+}
+
+func dispatchKey(p *Payload) string {
+	var d struct {
+		GroupOpenID string `json:"group_openid"`
+		UserOpenID  string `json:"user_openid"`
+		Author      struct {
+			ID         string `json:"id"`
+			UserOpenID string `json:"user_openid"`
+		} `json:"author"`
+	}
+	_ = json.Unmarshal(p.D, &d)
+	switch {
+	case d.GroupOpenID != "":
+		return "g:" + d.GroupOpenID
+	case d.UserOpenID != "":
+		return "u:" + d.UserOpenID
+	case d.Author.UserOpenID != "":
+		return "u:" + d.Author.UserOpenID
+	case d.Author.ID != "":
+		return "a:" + d.Author.ID
+	default:
+		return "id:" + p.ID
 	}
 }
 
