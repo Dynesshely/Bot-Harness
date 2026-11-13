@@ -87,7 +87,7 @@ jobs:
         env:
           PG_TEST_DSN: postgres://bot:test-only@127.0.0.1:5432/bot_test?sslmode=disable
           BOT_HARNESS_TEST_PG_DSN: postgres://bot:test-only@127.0.0.1:5432/bot_test?sslmode=disable
-        run: go test ./internal/store ./internal/pgmigrate ./internal/media -count=1 -timeout=10m
+        run: go test -p 1 ./internal/store ./internal/pgmigrate ./internal/media -count=1 -timeout=10m
 
   lint:
     name: go · gofmt + staticcheck
