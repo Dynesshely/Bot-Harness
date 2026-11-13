@@ -28,6 +28,14 @@
 - `web/package.json`：公开包（`private: false`）、Apache-2.0、版本 `0.1.0`、仓库地址、
   锁定 `pnpm@11.25.0`。
 
+## [0.4.5] - 2026-11-13
+
+### Fixed
+
+- **WebSocket 读循环不再被慢事件阻塞**：按群哈希的 8 个有界 worker 分片，同群保序；
+  图片下载、身份刷新、join gate、/human-status 不再堵住心跳与其它群的事件。
+  队列满时记录 WARN 并丢弃，不再无限阻塞读取。
+
 ## [0.4.4] - 2026-11-13
 
 ### Security
