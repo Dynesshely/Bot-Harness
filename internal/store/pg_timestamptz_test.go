@@ -15,6 +15,11 @@ import (
 // timestamp. Kept next to the schema it pins rather than derived from it, so a
 // new time column that misses the timestamptz treatment fails this test.
 var postgresTimestampColumns = []string{
+	"affect_events.created_at",
+	"affect_history.at",
+	"affect_states.paused_until",
+	"affect_states.ticked_at",
+	"affect_states.updated_at",
 	"commitments.created_at",
 	"commitments.deadline_at",
 	"commitments.last_nudge_at",
@@ -22,7 +27,10 @@ var postgresTimestampColumns = []string{
 	"commitments.ack_at",
 	"conversations.created_at",
 	"conversations.last_active_at",
+	"conversation_summaries.updated_at",
 	"dedup.created_at",
+	"expressions.created_at",
+	"expressions.updated_at",
 	"human_status.expires_at",
 	"human_status.updated_at",
 	"join_decisions.created_at",
@@ -47,6 +55,8 @@ var postgresTimestampColumns = []string{
 // postgresNullableTimestampColumns are the timestamp columns where the empty
 // string is the "unset" value. They must be nullable on PostgreSQL.
 var postgresNullableTimestampColumns = map[string]bool{
+	"affect_states.paused_until":   true,
+	"affect_states.ticked_at":      true,
 	"commitments.ack_at":           true,
 	"commitments.deadline_at":      true,
 	"commitments.last_nudge_at":    true,
