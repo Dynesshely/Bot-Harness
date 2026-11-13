@@ -261,7 +261,7 @@ func (d *Dispatcher) reflect(ctx context.Context, s settings.Settings, groupOpen
 
 	callCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	res, err := d.ai.Chat(callCtx, ai.ChatRequest{
+	res, err := d.backgroundChat(callCtx, ai.ChatRequest{
 		Model:       s.Model,
 		Messages:    []ai.Message{{Role: ai.RoleUser, Content: fmt.Sprintf(reflectPrompt, strings.Join(lines, "\n"))}},
 		Temperature: 0.7,

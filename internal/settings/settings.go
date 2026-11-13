@@ -665,6 +665,16 @@ func New(ctx context.Context, st *store.Store, base Settings) (*Manager, error) 
 // Get returns the current settings document.
 func (m *Manager) Get() Settings { return *m.cur.Load() }
 
+// MaskSecrets returns a copy with every credential blanked. It is the single
+// place the admin API and the chat tools use, so adding a new secret cannot
+// leave one path leaking it.
+func MaskSecrets(s Settings) Settings {
+	s.OpenAIAPIKey = ""
+	s.QQAppSecret = ""
+	s.AdminToken = ""
+	return s
+}
+
 // OverriddenKeys lists fields currently overridden from the admin panel.
 func (m *Manager) OverriddenKeys() []string {
 	m.mu.Lock()

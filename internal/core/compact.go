@@ -47,7 +47,7 @@ func compactSummaryBlock(summary string) string {
 
 // startCompaction schedules one background compaction per conversation.
 // It never blocks the reply.
-func (d *Dispatcher) startCompaction(conversationID string, s settings.Settings) {
+func (d *Dispatcher) startCompaction(conversationID string, s settings.Settings, includeUnaddressed bool) {
 	if d.st == nil || d.ai == nil || conversationID == "" {
 		return
 	}
@@ -70,7 +70,7 @@ func (d *Dispatcher) startCompaction(conversationID string, s settings.Settings)
 		}()
 		ctx, cancel := context.WithTimeout(d.base(), compactTimeout)
 		defer cancel()
-		if err := d.compactOnce(ctx, conversationID, s); err != nil {
+		if err := d.compactOnce(ctx, conversationID, s, includeUnaddressed); err != nil {
 			d.log.Warn("context compaction failed", "component", "compact",
 				"conversation", conversationID, "error", err.Error())
 		}
@@ -79,12 +79,12 @@ func (d *Dispatcher) startCompaction(conversationID string, s settings.Settings)
 
 // compactOnce summarizes the oldest messages beyond the keep window. It is
 // exposed separately so tests can drive it without a background race.
-func (d *Dispatcher) compactOnce(ctx context.Context, conversationID string, s settings.Settings) error {
+func (d *Dispatcher) compactOnce(ctx context.Context, conversationID string, s settings.Settings, includeUnaddressed bool) error {
 	cur, err := d.st.GetConversationSummary(ctx, conversationID)
 	if err != nil {
 		return err
 	}
-	msgs, err := d.st.MessagesAfter(ctx, conversationID, cur.ThroughMessageID, historyLimit(s)*2)
+	msgs, err := d.st.MessagesAfter(ctx, conversationID, cur.ThroughMessageID, historyLimit(s)*2, includeUnaddressed)
 	if err != nil {
 		return err
 	}
@@ -103,17 +103,30 @@ func (d *Dispatcher) compactOnce(ctx context.Context, conversationID string, s s
 		return nil
 	}
 
-	cut := len(msgs) - compactKeepMessages
-	chars := 0
-	for i, m := range msgs[:cut] {
-		chars += len([]rune(m.Content))
-		if chars > compactInputMaxChars {
-			cut = i
+	maxInput := compactInputMaxChars - len([]rune(cur.Summary)) - 128
+	if maxInput < 2000 {
+		maxInput = 2000
+	}
+	cutLimit := len(msgs) - compactKeepMessages
+	if cutLimit > len(msgs) {
+		cutLimit = len(msgs)
+	}
+	cut, used := 0, 0
+	for cut < cutLimit {
+		cost := len([]rune(msgs[cut].Content))
+		if cost > 1200 {
+			cost = 1200
+		}
+		if cut > 0 && used+cost > maxInput {
 			break
 		}
+		used += cost
+		cut++
 	}
-	if cut < 2 {
-		return nil
+	if cut < 1 {
+		// Never leave the cursor stuck on an oversized first message. The
+		// summarizer truncates it, but the cursor must still advance.
+		cut = 1
 	}
 	batch := msgs[:cut]
 	summary, err := d.summarizeMessages(ctx, s, cur.Summary, batch)
@@ -182,6 +195,19 @@ func (d *Dispatcher) summarizeMessages(ctx context.Context, s settings.Settings,
 		return "", fmt.Errorf("empty summary")
 	}
 	return strings.TrimSpace(res.Text), nil
+}
+
+// backgroundChat runs a non-turn model call under the same concurrency cap as
+// a user-visible turn. Without this, memory extraction / expression learning /
+// proactive reflection could each exceed max_concurrent_llm on their own.
+func (d *Dispatcher) backgroundChat(ctx context.Context, req ai.ChatRequest) (*ai.ChatResult, error) {
+	if d.aiSem != nil {
+		if err := d.aiSem.Acquire(ctx); err != nil {
+			return nil, err
+		}
+		defer d.aiSem.Release()
+	}
+	return d.ai.Chat(ctx, req)
 }
 
 func estimateMessagesTokens(msgs []store.Message) int {

@@ -193,7 +193,14 @@ func (d *Dispatcher) converse(ctx context.Context, in *Inbound, s settings.Setti
 				"component", "tools", "steps", step+1, "conversation", conv.ID)
 			defs = nil
 			messages = append(messages,
-				ai.Message{Role: ai.RoleAssistant, Content: out.result.Text, ToolCalls: out.result.ToolCalls},
+				ai.Message{Role: ai.RoleAssistant, Content: out.result.Text, ToolCalls: out.result.ToolCalls})
+			// OpenAI-compatible APIs require every tool_call id to have a matching
+			// role=tool message. Skipping them here makes the "budget exhausted"
+			// fallback itself return HTTP 400, which is worse than the partial answer.
+			for _, call := range out.result.ToolCalls {
+				messages = append(messages, ai.ToolMessage(call.ID, "（工具调用次数已用完，本次未执行）"))
+			}
+			messages = append(messages,
 				ai.Message{Role: ai.RoleUser, Content: "（工具调用次数已用完，请直接用现有信息回答，不要再调用工具。）"})
 			continue
 		}

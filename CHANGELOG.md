@@ -28,6 +28,21 @@
 - `web/package.json`：公开包（`private: false`）、Apache-2.0、版本 `0.1.0`、仓库地址、
   锁定 `pnpm@11.25.0`。
 
+## [0.4.4] - 2026-11-13
+
+### Security
+
+- **配置工具不再泄露秘密**：`settings_read` 统一清空 OpenAI Key / QQ Secret / Admin Token；
+  `settings_write` 拒绝修改 `admin_token` / `qq_app_secret`；`describeDiff` 不再回显秘密。
+  生产已按 P0 处置：关闭 `exec_enabled`、轮换 Admin Token。
+
+### Fixed
+
+- **compact 正确性**：摘要后读取最新窗口而不是最旧窗口；保留 `context_scope` 的 kind 过滤；
+  首条超长消息也会推进游标；清空会话/全部会话同时删除滚动摘要；
+- 后台记忆/表达/主动反思复用 `aiSem`，不再绕过 `max_concurrent_llm`；
+- 工具预算耗尽时为每个 `tool_call` 补 `tool` 消息，避免兼容端点返回 400。
+
 ## [0.4.3] - 2026-11-13
 
 ### Added

@@ -339,7 +339,7 @@ func (d *Dispatcher) extractMemories(conversationID string, in *Inbound, cfg set
 		ctx, cancel := context.WithTimeout(d.base(), 30*time.Second)
 		defer cancel()
 
-		res, err := d.ai.Chat(ctx, ai.ChatRequest{
+		res, err := d.backgroundChat(ctx, ai.ChatRequest{
 			Model:       s.Model,
 			Messages:    []ai.Message{{Role: ai.RoleUser, Content: fmt.Sprintf(extractPrompt, userText, reply)}},
 			Temperature: 0,
