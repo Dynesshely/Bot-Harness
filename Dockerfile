@@ -44,7 +44,7 @@ RUN go build -trimpath -tags netgo \
 # subcommand, and Go handles SIGTERM directly. That keeps the runtime image
 # buildable even where apk's HTTPS fetches are blocked by a proxy.
 FROM alpine:3.21@sha256:87a4361f6c819618a6bafa2ed5228714cb0bb22195d2b49c95eb26799990128a AS runtime
-ARG VERSION=0.4.1
+ARG VERSION=0.4.11
 LABEL org.opencontainers.image.title="bot-harness" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.description="QQ group AI chat bot with a built-in admin panel" \
