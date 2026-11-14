@@ -2114,7 +2114,7 @@ func TestEarlyNoticeIsRecalledAfterTheAnswerLands(t *testing.T) {
 	// 等撤回调用发生；race 模式下调度更慢，给足余量。
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(h.recalls()) >= 1 {
+		if len(h.recalls()) >= 1 && h.dis.Metrics().EarlyRepliesRecalled.Load() >= 1 {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)

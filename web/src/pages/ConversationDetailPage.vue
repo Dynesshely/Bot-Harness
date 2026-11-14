@@ -166,7 +166,8 @@ async function load(silent = false) {
   } catch (err) {
     if (isAbortError(err)) return
     error.value = toMessage(err)
-    detail.value = null
+    // 静默刷新失败时保留已经看到的详情；清空会让用户以为消息不见了。
+    if (!silent) detail.value = null
   } finally {
     if (controller === current) {
       loading.value = false

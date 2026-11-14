@@ -17,6 +17,7 @@ import { actionsApi, configApi, modelsApi, toMessage } from '@/api'
 import type { ConfigData, TestAiResult } from '@/api/types'
 import { logout } from '@/stores/auth'
 import { toast } from '@/composables/useToast'
+import { useUnsavedGuard } from '@/composables/useUnsavedGuard'
 
 const router = useRouter()
 
@@ -102,6 +103,13 @@ async function loadModels(refresh: boolean) {
 const patch = computed(() => buildPatch(draft, loaded.value))
 
 const dirty = computed(() => Object.keys(patch.value).length > 0)
+useUnsavedGuard(dirty)
+
+/** 重新加载会丢弃草稿，dirty 时必须先确认。 */
+function reloadWithGuard() {
+  if (dirty.value && !window.confirm('有未保存的修改，重新加载会丢弃它们。继续吗？')) return
+  void load()
+}
 
 /**
  * 保存前的本地校验：后端 validateRanges 会拒的情况，先在界面上拦住。
@@ -419,7 +427,7 @@ const SECTIONS = [
         <button type="button" class="btn btn-ghost btn-sm" :disabled="!dirty || saving" @click="discard">
           放弃修改
         </button>
-        <button type="button" class="btn btn-ghost btn-sm" :disabled="loading || saving" @click="load">
+        <button type="button" class="btn btn-ghost btn-sm" :disabled="loading || saving" @click="reloadWithGuard">
           <AppIcon name="refresh" :size="14" />
           重新加载
         </button>
