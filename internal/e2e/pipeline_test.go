@@ -2111,8 +2111,8 @@ func TestEarlyNoticeIsRecalledAfterTheAnswerLands(t *testing.T) {
 	if len(sent) != 2 {
 		t.Fatalf("应先发即时回复再发正式答复，实际 %d 条", len(sent))
 	}
-	// 等撤回调用发生
-	deadline := time.Now().Add(3 * time.Second)
+	// 等撤回调用发生；race 模式下调度更慢，给足余量。
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if len(h.recalls()) >= 1 {
 			break
