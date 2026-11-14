@@ -77,6 +77,7 @@
     "memory_inject_max",
     "memory_max_per_scope",
     "model",
+    "model_context_tokens",
     "openai_api_key",
     "openai_base_url",
     "persona",

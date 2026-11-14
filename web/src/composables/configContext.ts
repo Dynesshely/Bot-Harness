@@ -13,6 +13,7 @@ export interface EditableDraft {
   request_timeout_seconds: number | null
   context_max_turns: number | null
   context_max_tokens: number | null
+  model_context_tokens: number | null
   history_ttl_hours: number | null
   reply_max_chars: number | null
   reply_max_segments: number | null
@@ -203,6 +204,7 @@ export function emptyDraft(): EditableDraft {
     request_timeout_seconds: null,
     context_max_turns: null,
     context_max_tokens: null,
+    model_context_tokens: null,
     history_ttl_hours: null,
     reply_max_chars: null,
     reply_max_segments: null,
@@ -336,6 +338,7 @@ export type NumericKey =
   | 'request_timeout_seconds'
   | 'context_max_turns'
   | 'context_max_tokens'
+  | 'model_context_tokens'
   | 'history_ttl_hours'
   | 'reply_max_chars'
   | 'reply_max_segments'
@@ -402,6 +405,7 @@ export const MODEL_PARAM_KEYS = [
   'request_timeout_seconds',
   'context_max_turns',
   'context_max_tokens',
+  'model_context_tokens',
   'history_ttl_hours',
   'reply_max_chars',
   'reply_max_segments',
@@ -459,6 +463,7 @@ export function assign(target: EditableDraft, source: EditableConfig | EditableD
   target.request_timeout_seconds = source.request_timeout_seconds ?? null
   target.context_max_turns = source.context_max_turns ?? null
   target.context_max_tokens = source.context_max_tokens ?? null
+  target.model_context_tokens = source.model_context_tokens ?? null
   target.history_ttl_hours = source.history_ttl_hours ?? null
   target.reply_max_chars = source.reply_max_chars ?? null
   target.reply_max_segments = source.reply_max_segments ?? null
@@ -578,6 +583,7 @@ export const NUMERIC_PATCH_KEYS: readonly NumericKey[] = [
   'request_timeout_seconds',
   'context_max_turns',
   'context_max_tokens',
+  'model_context_tokens',
   'history_ttl_hours',
   'reply_max_chars',
   'reply_max_segments',

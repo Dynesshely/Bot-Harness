@@ -92,7 +92,7 @@ func (d *Dispatcher) compactOnce(ctx context.Context, conversationID string, s s
 		return nil
 	}
 	tokens := estimateMessagesTokens(msgs)
-	budget := s.ContextMaxTokens - s.MaxTokens
+	budget := effectiveContextLimit(s) - s.MaxTokens
 	if budget < 256 {
 		budget = 256
 	}

@@ -193,6 +193,7 @@ export interface EditableConfig {
   request_timeout_seconds?: number
   context_max_turns?: number
   context_max_tokens?: number
+  model_context_tokens?: number
   history_ttl_hours?: number
   reply_max_chars?: number
   reply_max_segments?: number

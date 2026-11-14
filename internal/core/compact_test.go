@@ -137,3 +137,20 @@ func TestCompactAdvancesPastOversizedFirstMessage(t *testing.T) {
 		t.Fatalf("cursor did not advance: %+v (first=%d)", sum, first)
 	}
 }
+
+func TestEffectiveContextLimitUsesSmallerWindow(t *testing.T) {
+	s := settings.Defaults()
+	s.ContextMaxTokens = 1_000_000
+	s.ModelContextTokens = 128_000
+	if got := effectiveContextLimit(s); got != 128_000 {
+		t.Fatalf("limit = %d, want 128000", got)
+	}
+	s.ModelContextTokens = 2_000_000
+	if got := effectiveContextLimit(s); got != 1_000_000 {
+		t.Fatalf("limit = %d, want logical cap", got)
+	}
+	s.ModelContextTokens = 0
+	if got := effectiveContextLimit(s); got != 1_000_000 {
+		t.Fatalf("zero model window should fall back to logical cap, got %d", got)
+	}
+}

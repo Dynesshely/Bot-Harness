@@ -173,6 +173,19 @@ func sessionIdentityBlock(in *Inbound) string {
 		"管理员让你调整本群（或某个群）的设置时，用这个 OpenID 作为标识。", in.GroupOpenID)
 }
 
+// effectiveContextLimit is the smaller of the configured logical budget and
+// the provider context window, so a 1M setting cannot be sent to a 128k model.
+func effectiveContextLimit(s settings.Settings) int {
+	limit := s.ModelContextTokens
+	if limit <= 0 || (s.ContextMaxTokens > 0 && limit > s.ContextMaxTokens) {
+		limit = s.ContextMaxTokens
+	}
+	if limit <= 0 {
+		return 256000
+	}
+	return limit
+}
+
 // BuildChatMessages assembles the model input: a system prompt plus the most
 // recent history that fits the token budget.
 func BuildChatMessages(systemPrompt string, history []store.Message, userText string, budget int) []ai.Message {

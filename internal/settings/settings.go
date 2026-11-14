@@ -135,9 +135,13 @@ type Settings struct {
 	// ContextMaxTokens 是喂给模型的历史 token 预算（实际预算 = 该值 − MaxTokens）。
 	// 默认 256000 面向长上下文模型；校验上限 10000000 是预留值，远大于当前模型窗口。
 	ContextMaxTokens int `json:"context_max_tokens"`
-	HistoryTTLHours  int `json:"history_ttl_hours"`
-	ReplyMaxChars    int `json:"reply_max_chars"`
-	ReplyMaxSegments int `json:"reply_max_segments"`
+	// ModelContextTokens is the model provider's real context window. The
+	// effective prompt budget is min(ContextMaxTokens, ModelContextTokens) -
+	// MaxTokens, so a 1M config cannot be sent to a 128k model by accident.
+	ModelContextTokens int `json:"model_context_tokens"`
+	HistoryTTLHours    int `json:"history_ttl_hours"`
+	ReplyMaxChars      int `json:"reply_max_chars"`
+	ReplyMaxSegments   int `json:"reply_max_segments"`
 	// ReplyDebounceMode merges consecutive un-@ group messages into one turn:
 	// off / fast / natural / steady (default natural). It is pure expression:
 	// @ / quoting the bot / commands never wait, and the merged messages keep
@@ -469,6 +473,7 @@ func Defaults() Settings {
 		RequestTimeoutSeconds:       90,
 		ContextMaxTurns:             12,
 		ContextMaxTokens:            256000,
+		ModelContextTokens:          128000,
 		HistoryTTLHours:             72,
 		ReplyMaxChars:               1200,
 		ReplyMaxSegments:            3,
@@ -897,6 +902,9 @@ func validateRanges(s *Settings) error {
 	}
 	if s.ContextMaxTokens < 256 || s.ContextMaxTokens > 10_000_000 {
 		problems = append(problems, "context_max_tokens must be within [256, 10000000]")
+	}
+	if s.ModelContextTokens < 4096 || s.ModelContextTokens > 10_000_000 {
+		problems = append(problems, "model_context_tokens must be within [4096, 10000000]")
 	}
 	if s.HistoryTTLHours < 1 || s.HistoryTTLHours > 8760 {
 		problems = append(problems, "history_ttl_hours must be within [1, 8760]")
@@ -1493,6 +1501,8 @@ func applyKey(dst *Settings, key string, raw json.RawMessage) error {
 		return json.Unmarshal(raw, &dst.ContextMaxTurns)
 	case "context_max_tokens":
 		return json.Unmarshal(raw, &dst.ContextMaxTokens)
+	case "model_context_tokens":
+		return json.Unmarshal(raw, &dst.ModelContextTokens)
 	case "history_ttl_hours":
 		return json.Unmarshal(raw, &dst.HistoryTTLHours)
 	case "reply_max_chars":
