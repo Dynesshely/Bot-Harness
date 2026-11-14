@@ -22,6 +22,9 @@ type Metrics struct {
 	MessagesObserved     atomic.Int64
 	EarlyRepliesRecalled atomic.Int64
 	AIRequests           atomic.Int64
+	TurnsStarted         atomic.Int64
+	TurnLatencySumMS     atomic.Int64
+	TurnLatencyCount     atomic.Int64
 	AIErrors             atomic.Int64
 	AIInFlight           atomic.Int64
 	AILatencySumMS       atomic.Int64
@@ -91,6 +94,8 @@ type CounterSnapshot struct {
 	MessagesObserved       int64 `json:"messages_observed"`
 	EarlyRepliesRecalled   int64 `json:"early_replies_recalled"`
 	AIRequests             int64 `json:"ai_requests"`
+	TurnsStarted           int64 `json:"turns_started"`
+	TurnLatencyAvgMS       int64 `json:"turn_latency_avg_ms"`
 	AIErrors               int64 `json:"ai_errors"`
 	TokensUsed             int64 `json:"tokens_used"`
 	PolishRequests         int64 `json:"polish_requests"`
@@ -116,6 +121,13 @@ type CounterSnapshot struct {
 	JoinGateTopics         int64 `json:"join_gate_topics"`
 }
 
+func averageMS(sum, count int64) int64 {
+	if count == 0 {
+		return 0
+	}
+	return sum / count
+}
+
 // Snapshot returns the current counter values.
 func (m *Metrics) Snapshot() CounterSnapshot {
 	return CounterSnapshot{
@@ -128,6 +140,8 @@ func (m *Metrics) Snapshot() CounterSnapshot {
 		MessagesObserved:       m.MessagesObserved.Load(),
 		EarlyRepliesRecalled:   m.EarlyRepliesRecalled.Load(),
 		AIRequests:             m.AIRequests.Load(),
+		TurnsStarted:           m.TurnsStarted.Load(),
+		TurnLatencyAvgMS:       averageMS(m.TurnLatencySumMS.Load(), m.TurnLatencyCount.Load()),
 		AIErrors:               m.AIErrors.Load(),
 		TokensUsed:             m.TokensUsed.Load(),
 		PolishRequests:         m.PolishRequests.Load(),

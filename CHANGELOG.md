@@ -33,6 +33,8 @@
 ### Added
 
 - 设置页未保存守卫：刷新/关闭标签页触发 beforeunload，路由离开与「重新加载」二次确认；
+- Dispatcher 观测拆分：bot 旁观/忽略日志移入 `dispatcher_observe.go`；
+  `Inbound.request_id` 贯通日志，新增 `turns_started` / `turn_latency_avg_ms` 指标。
 - 对话详情静默刷新失败保留已有详情，不再清空成空页。
 
 ## [0.4.10] - 2026-11-15

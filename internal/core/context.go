@@ -20,9 +20,12 @@ const (
 
 // Inbound is a normalised inbound chat message.
 type Inbound struct {
-	EventType    string
-	MsgID        string // d.id, used as the passive reply target
-	EventID      string // envelope id, used for event-based replies
+	EventType string
+	MsgID     string // d.id, used as the passive reply target
+	EventID   string // envelope id, used for event-based replies
+	// RequestID is the stable per-event id used in logs and metrics. It is the
+	// platform envelope id, falling back to the message id.
+	RequestID    string
 	Scene        string // "group" or "c2c"
 	GroupOpenID  string
 	MemberOpenID string
