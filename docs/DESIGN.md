@@ -368,7 +368,7 @@ rows[]humanStatusRow
 | `settings` | 运行时配置覆盖 | 长期，可一键重置 |
 | `stats` | 分钟级统计桶（重启后图表不空） | 7 天，内存聚合 + 30 秒落盘 |
 
-- 共 **12 张表**（上表 6 张 + `tool_calls` / `memories` / `proactive_state` / `scheduled_tasks` / `media` / `schema_migrations`）。
+- 共 **21 张表**（上表 6 张 + `tool_calls` / `memories` / `proactive_state` / `scheduled_tasks` / `media` / `schema_migrations` / `commitments` / `human_status` / `join_decisions` / `join_topics` / `affect_states` / `affect_events` / `affect_history` / `expressions` / `conversation_summaries`）。
 - **两后端的列类型差异都收在这里**：`media.data` 是 `BLOB`（SQLite）/ `BYTEA`（PostgreSQL），
   `media.size` 两边都是 `BIGINT`，`memories.salience` 两边都是 `REAL` / `DOUBLE PRECISION`。
   布尔字段（`conversations.enabled`、`messages.addressed`）两种后端**都保留 `INTEGER`**。

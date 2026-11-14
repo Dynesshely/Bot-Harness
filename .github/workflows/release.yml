@@ -17,6 +17,7 @@ on:
 permissions:
   contents: write
   packages: write
+  actions: read
 
 concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
@@ -34,6 +35,35 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Tag 推送会同时触发 CI 与 Release；先等同一个 commit 的 CI 成功，
+      # 避免「CI 红但镜像已经发了」。main 上已有成功 CI 时立即通过。
+      - name: require green CI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for i in $(seq 1 40); do
+            line=$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --limit 1 \
+              --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"' 2>/dev/null || true)
+            status=${line%% *}
+            conclusion=${line#* }
+            if [ "$status" = "completed" ] && [ "$conclusion" = "success" ]; then
+              echo "CI is green for $GITHUB_SHA"
+              exit 0
+            fi
+            if [ "$status" = "completed" ] && [ "$conclusion" != "success" ] && [ "$conclusion" != "" ]; then
+              echo "::error::CI for $GITHUB_SHA concluded $conclusion; refusing to release"
+              exit 1
+            fi
+            echo "waiting for CI ($i/40): ${line:-no run yet}"
+            sleep 30
+          done
+          echo "::error::timed out waiting for green CI for $GITHUB_SHA"
+          exit 1
+
+      - name: derive version
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: set up QEMU
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
@@ -56,14 +86,14 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            VERSION=${{ github.ref_name }}
+            VERSION=${{ steps.version.outputs.value }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
