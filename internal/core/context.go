@@ -29,6 +29,9 @@ type Inbound struct {
 	UserOpenID   string
 	MemberName   string
 	Content      string
+	// QuotedText is the quoted message's text, if the platform supplied it in
+	// msg_elements. It is model input only; the stored user message stays clean.
+	QuotedText string
 	// AtBot reports that this message is addressed to the bot: either a
 	// GROUP_AT_MESSAGE_CREATE, or a full-group message that @s it.
 	AtBot bool

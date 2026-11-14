@@ -543,6 +543,7 @@ func (d *Dispatcher) DispatchMessage(ctx context.Context, p *qq.Payload, ev *qq.
 		UserOpenID:    ev.Author.UserOpenID,
 		MemberName:    ev.Author.DisplayName(),
 		Content:       ev.Text(),
+		QuotedText:    ev.QuotedText(),
 		AtBot:         addressedToBot,
 		MentionedBot:  botMentions > 0,
 		SelfMentioned: selfMentioned,

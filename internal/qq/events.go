@@ -188,6 +188,35 @@ func (e *MessageEvent) Text() string {
 	return ""
 }
 
+// QuotedText returns the text carried in msg_elements by a quoted or merged
+// message. It is deliberately empty when the top-level Content is empty: in
+// that case Text() already falls back to the quote, and prepending it again
+// would duplicate the same text in the prompt.
+func (e *MessageEvent) QuotedText() string {
+	if e == nil || strings.TrimSpace(e.Content) == "" || len(e.MsgElements) == 0 {
+		return ""
+	}
+	var parts []string
+	var walk func([]MsgElement)
+	walk = func(elements []MsgElement) {
+		for _, el := range elements {
+			content := strings.TrimSpace(el.Content)
+			if content != "" {
+				who := el.Author.DisplayName()
+				if who == "" {
+					who = "某人"
+				}
+				parts = append(parts, who+"："+content)
+			}
+			if len(el.MsgElements) > 0 {
+				walk(el.MsgElements)
+			}
+		}
+	}
+	walk(e.MsgElements)
+	return strings.Join(parts, "\n")
+}
+
 // ErrNotMessageEvent is returned when a payload is not a chat message.
 var ErrNotMessageEvent = errors.New("payload is not a message event")
 

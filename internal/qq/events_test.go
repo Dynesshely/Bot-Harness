@@ -1,6 +1,9 @@
 package qq
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestQuotedAttachmentsWalksMsgElements(t *testing.T) {
 	event := &MessageEvent{
@@ -31,5 +34,21 @@ func TestQuotedAttachmentsEmpty(t *testing.T) {
 	}
 	if got := (&MessageEvent{Attachments: []MessageAttachment{{URL: "a"}}}).QuotedAttachments(); got != nil {
 		t.Fatalf("顶层附件不算引用，实际 %#v", got)
+	}
+}
+
+func TestQuotedTextExtractsAuthorAndContent(t *testing.T) {
+	e := &MessageEvent{
+		Content: "这是什么",
+		MsgElements: []MsgElement{{
+			Author:  User{Username: "小明", MemberOpenID: "U1"},
+			Content: "被引用的原始内容",
+		}},
+	}
+	if got := e.QuotedText(); !strings.Contains(got, "小明") || !strings.Contains(got, "被引用的原始内容") {
+		t.Fatalf("quoted text = %q", got)
+	}
+	if got := (&MessageEvent{Content: "", MsgElements: e.MsgElements}).QuotedText(); got != "" {
+		t.Fatalf("empty top-level content must use Text() fallback, got %q", got)
 	}
 }
