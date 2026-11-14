@@ -430,30 +430,43 @@ func (s *Store) migrate(ctx context.Context) error {
 	return s.runMigrations(ctx)
 }
 
-// runMigrations applies each pending migration exactly once.
-func (s *Store) runMigrations(ctx context.Context) error {
-	migrations := []struct {
-		name string
-		fn   func(context.Context) error
-	}{
-		{"0001_messages_kind_speaker", s.migrationMessagesKindSpeaker},
-		{"0002_backfill_message_speakers", s.backfillSpeakers},
-		{"0003_backfill_shared_speakers", s.backfillSharedSpeakers},
-		{"0004_messages_attachments", s.migrationMessagesAttachments},
-		{"0005_messages_speaker_openid", s.migrationMessagesSpeakerOpenID},
-		{"0006_backfill_message_speaker_openid", s.backfillMessageSpeakerOpenID},
-		{"0007_records_delivery", s.migrationRecordsDelivery},
-		{"0008_messages_quote_index", s.migrationMessagesQuoteIndex},
-		{"0009_tasks_creator", s.migrationTasksCreator},
-		{"0010_messages_addressed", s.migrationMessagesAddressed},
-		{"0011_commitments", s.migrationCommitments},
-		{"0012_human_status", s.migrationHumanStatus},
-		{"0013_affect", s.migrationAffect},
-		{"0014_join_gate", s.migrationJoinGate},
-		{"0015_expressions", s.migrationExpressions},
-		{"0016_conversation_summaries", s.migrationConversationSummaries},
+type migration struct {
+	name     string
+	sqlite   func(context.Context) error
+	postgres func(context.Context) error
+}
+
+// migrationList is the single versioned migration registry. SQLite runs the
+// sqlite function; PostgreSQL starts from its schema baseline and runs only
+// future entries that provide a postgres function. Adding a migration without
+// a PostgreSQL function is caught by TestMigrationRegistry.
+func migrationList(s *Store) []migration {
+	return []migration{
+		{"0001_messages_kind_speaker", s.migrationMessagesKindSpeaker, nil},
+		{"0002_backfill_message_speakers", s.backfillSpeakers, nil},
+		{"0003_backfill_shared_speakers", s.backfillSharedSpeakers, nil},
+		{"0004_messages_attachments", s.migrationMessagesAttachments, nil},
+		{"0005_messages_speaker_openid", s.migrationMessagesSpeakerOpenID, nil},
+		{"0006_backfill_message_speaker_openid", s.backfillMessageSpeakerOpenID, nil},
+		{"0007_records_delivery", s.migrationRecordsDelivery, nil},
+		{"0008_messages_quote_index", s.migrationMessagesQuoteIndex, nil},
+		{"0009_tasks_creator", s.migrationTasksCreator, nil},
+		{"0010_messages_addressed", s.migrationMessagesAddressed, nil},
+		{"0011_commitments", s.migrationCommitments, nil},
+		{"0012_human_status", s.migrationHumanStatus, nil},
+		{"0013_affect", s.migrationAffect, nil},
+		{"0014_join_gate", s.migrationJoinGate, nil},
+		{"0015_expressions", s.migrationExpressions, nil},
+		{"0016_conversation_summaries", s.migrationConversationSummaries, nil},
 	}
-	for _, m := range migrations {
+}
+
+// runMigrations applies each pending SQLite migration exactly once.
+func (s *Store) runMigrations(ctx context.Context) error {
+	for _, m := range migrationList(s) {
+		if m.sqlite == nil {
+			return fmt.Errorf("store: migration %s has no sqlite function", m.name)
+		}
 		var applied int
 		if err := s.queryRowContext(ctx,
 			`SELECT COUNT(*) FROM schema_migrations WHERE name = ?`, m.name).Scan(&applied); err != nil {
@@ -462,7 +475,7 @@ func (s *Store) runMigrations(ctx context.Context) error {
 		if applied > 0 {
 			continue
 		}
-		if err := m.fn(ctx); err != nil {
+		if err := m.sqlite(ctx); err != nil {
 			return fmt.Errorf("store: migration %s: %w", m.name, err)
 		}
 		if _, err := s.execContext(ctx,
