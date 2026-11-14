@@ -16,7 +16,7 @@ import (
 )
 
 // Version is overridable at build time via -ldflags "-X .../config.Version=...".
-var Version = "0.4.10"
+var Version = "0.4.11"
 
 // Config is the bootstrap configuration: only what is needed to find the
 // database. Everything else lives in package settings.
