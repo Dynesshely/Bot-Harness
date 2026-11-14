@@ -457,7 +457,42 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 	if err := s.normalizeMemoriesUnique(ctx); err != nil {
 		return fmt.Errorf("store: migrate postgres: %w", err)
 	}
-	return s.seedMigrationBaseline(ctx)
+	if err := s.seedMigrationBaseline(ctx); err != nil {
+		return err
+	}
+	return s.runPostgresMigrations(ctx)
+}
+
+// runPostgresMigrations applies migrations that have a PostgreSQL function.
+// Existing 0001–0016 are covered by pgSchema and the baseline; new migrations
+// must provide both sqlite and postgres functions, so PG and SQLite cannot
+// silently diverge again.
+func (s *Store) runPostgresMigrations(ctx context.Context) error {
+	return s.applyPostgresMigrations(ctx, migrationList(s))
+}
+
+func (s *Store) applyPostgresMigrations(ctx context.Context, list []migration) error {
+	for _, m := range list {
+		if m.postgres == nil {
+			continue
+		}
+		var applied int
+		if err := s.queryRowContext(ctx,
+			`SELECT COUNT(*) FROM schema_migrations WHERE name = ?`, m.name).Scan(&applied); err != nil {
+			return fmt.Errorf("store: check postgres migration %s: %w", m.name, err)
+		}
+		if applied > 0 {
+			continue
+		}
+		if err := m.postgres(ctx); err != nil {
+			return fmt.Errorf("store: postgres migration %s: %w", m.name, err)
+		}
+		if _, err := s.execContext(ctx,
+			`INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)`, m.name, nowRFC3339()); err != nil {
+			return fmt.Errorf("store: record postgres migration %s: %w", m.name, err)
+		}
+	}
+	return nil
 }
 
 // legacyMemoriesUnique is the constraint name older versions of pgSchema wrote.

@@ -28,6 +28,14 @@
 - `web/package.json`：公开包（`private: false`）、Apache-2.0、版本 `0.1.0`、仓库地址、
   锁定 `pnpm@11.25.0`。
 
+## [0.4.10] - 2026-11-15
+
+### Fixed
+
+- PostgreSQL 版本化迁移：迁移注册表改为 sqlite/postgres 双函数；PG 在 schema baseline
+  之后执行新增迁移，不再是「只建表 + 记 baseline」。新增 registry/表集合/真实 PG runner 测试。
+  0001–0016 仍由 pgSchema + baseline 覆盖，未来 0017+ 必须在两个引擎都实现。
+
 ## [0.4.9] - 2026-11-15
 
 ### Added
