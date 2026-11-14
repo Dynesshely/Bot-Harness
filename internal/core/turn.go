@@ -110,7 +110,7 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 		systemPrompt = appendSystemBlock(systemPrompt, visionSystemPrompt)
 	}
 
-	budget := s.ContextMaxTokens - s.MaxTokens
+	budget := effectiveContextLimit(s) - s.MaxTokens
 	if budget < 256 {
 		budget = 256
 	}

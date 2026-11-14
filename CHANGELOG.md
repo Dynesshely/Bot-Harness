@@ -28,6 +28,14 @@
 - `web/package.json`：公开包（`private: false`）、Apache-2.0、版本 `0.1.0`、仓库地址、
   锁定 `pnpm@11.25.0`。
 
+## [0.4.9] - 2026-11-15
+
+### Added
+
+- 新增 model_context_tokens（默认 128000）：实际上下文预算取
+  min(context_max_tokens, model_context_tokens) − max_tokens，避免 1M 配置误发给
+  128k 模型；compact 触发也使用同一上限。后台「模型与提示词」可改。
+
 ## [0.4.8] - 2026-11-14
 
 ### Added

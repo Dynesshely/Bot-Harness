@@ -222,6 +222,13 @@ const modelSelectOptions = computed(() => {
                 :max="10000000"
                 hint="默认 256000；范围 256 ~ 10000000"
               />
+              <NumberField
+                v-model="draft.model_context_tokens"
+                label="模型真实窗口 model_context_tokens"
+                :min="4096"
+                :max="10000000"
+                hint="默认 128000；实际预算取它与 context_max_tokens 的较小值"
+              />
               <NumberField v-model="draft.history_ttl_hours" label="历史保留 history_ttl_hours（小时）" :min="1" />
               <NumberField v-model="draft.reply_max_chars" label="回复最大字数 reply_max_chars" :min="1" />
               <NumberField v-model="draft.reply_max_segments" label="回复最大分段 reply_max_segments" :min="1" />
