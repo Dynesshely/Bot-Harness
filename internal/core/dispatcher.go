@@ -265,6 +265,17 @@ func (d *Dispatcher) Start(ctx context.Context) {
 }
 
 // truncateForLog bounds a raw payload so a sample cannot flood the log.
+// mentionsBotName reports a case-insensitive, whole-string name mention. Names
+// shorter than two runes are ignored: a one-character nickname would match
+// almost every sentence.
+func mentionsBotName(content, name string) bool {
+	name = strings.TrimSpace(name)
+	if len([]rune(name)) < 2 {
+		return false
+	}
+	return strings.Contains(strings.ToLower(content), strings.ToLower(name))
+}
+
 func truncateForLog(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
@@ -535,6 +546,17 @@ func (d *Dispatcher) DispatchMessage(ctx context.Context, p *qq.Payload, ev *qq.
 		}
 	}
 	addressedToBot := explicitAt || selfMentioned
+	// A name mention is addressing, even without an @. The gate model also
+	// sees the name, but this cheap check keeps the bot responsive when the
+	// gate's lightweight model is slow or reasoning-only.
+	if !addressedToBot && !ev.Author.Bot {
+		if name := d.botUsername(bgctx); mentionsBotName(ev.Text(), name) {
+			addressedToBot = true
+			d.log.Info("message mentions the bot name; treating it as addressed",
+				"component", "dispatch", "group_openid", ev.GroupOpenID,
+				"member", ev.Author.DisplayName(), "bot_name", name)
+		}
+	}
 
 	if p.T == qq.EventGroupMessageCreate {
 		if d.fullGroupSeen.CompareAndSwap(false, true) {

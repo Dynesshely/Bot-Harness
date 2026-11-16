@@ -77,13 +77,13 @@ const (
 	joinGateReasonRunes     = 200
 	joinGateMessageRunes    = 200
 	joinGatePreviewRunes    = 80
-	joinGateMaxTokens       = 600
+	joinGateMaxTokens       = 1500
 )
 
 // 调用的时间预算：拿不到并发额度就不评估（2s），单次调用 10s。
 const (
 	joinGateSemAcquireTimeout = 2 * time.Second
-	joinGateCallTimeout       = 10 * time.Second
+	joinGateCallTimeout       = 20 * time.Second
 )
 
 // 引用识别的读库预算：识别是回复的前置优化，绝不允许拖慢一条本来能发的消息。

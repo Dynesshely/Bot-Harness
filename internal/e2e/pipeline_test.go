@@ -4979,8 +4979,8 @@ func TestJoinGateUsesConfiguredModelAndParameters(t *testing.T) {
 	if got, _ := body["temperature"].(float64); got != 0.1 {
 		t.Fatalf("gate temperature = %v, want 0.1", got)
 	}
-	if got, _ := body["max_tokens"].(float64); got != 600 {
-		t.Fatalf("gate max_tokens = %v, want 600", got)
+	if got, _ := body["max_tokens"].(float64); got != 1500 {
+		t.Fatalf("gate max_tokens = %v, want 1500", got)
 	}
 }
 

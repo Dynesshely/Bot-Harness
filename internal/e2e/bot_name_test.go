@@ -6,6 +6,14 @@ import (
 	"testing"
 )
 
+func TestBotNameMentionRepliesWithoutAt(t *testing.T) {
+	h := newHarness(t)
+	h.dis.HandlePayload(context.Background(), groupAnyMessage("NAME2", "G1", "U1", "醉月酿星河", "kaku，你在吗"))
+	if sent := h.waitForSent(t, 1); len(sent) != 1 {
+		t.Fatalf("a name mention must be answered, got %d sends", len(sent))
+	}
+}
+
 func TestBotNameReachesSystemPrompt(t *testing.T) {
 	h := newHarness(t)
 	h.dis.HandlePayload(context.Background(), groupAtMessage("NAME1", "G1", "U1", "小明", "你叫什么名字"))
