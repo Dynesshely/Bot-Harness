@@ -25,7 +25,7 @@ import (
 // 不把私聊内容带进群聊。
 
 const (
-	expressionPromptTimeout = 15 * time.Second
+	expressionPromptTimeout = 30 * time.Second
 	expressionSelectTimeout = 2 * time.Second
 	expressionMaxCandidates = 5
 	expressionContextRunes  = 4000
@@ -275,6 +275,8 @@ func (d *Dispatcher) learnExpressions(ctx context.Context, conversationID string
 		defer cancel()
 		history, err := d.st.RecentMessages(runCtx, conversationID, 20, true)
 		if err != nil {
+			d.log.Warn("expression learning: failed to read history", "component", "expression",
+				"conversation", conversationID, "error", err.Error())
 			return
 		}
 		var b strings.Builder
@@ -292,12 +294,21 @@ func (d *Dispatcher) learnExpressions(ctx context.Context, conversationID string
 			Model: s.Model,
 			Messages: []ai.Message{{Role: ai.RoleSystem, Content: expressionLearnPrompt},
 				{Role: ai.RoleUser, Content: input}},
-			Temperature: 0, MaxTokens: 600, Stream: false,
+			Temperature: 0, MaxTokens: 1500, Stream: false,
 		})
 		if err != nil || res == nil {
+			d.log.Warn("expression learning: model call failed", "component", "expression",
+				"conversation", conversationID, "error", errString(err))
 			return
 		}
-		for _, c := range parseExpressionCandidates(res.Text) {
+		candidates := parseExpressionCandidates(res.Text)
+		if len(candidates) == 0 {
+			d.log.Info("expression learning: no candidates", "component", "expression",
+				"conversation", conversationID, "reply_chars", len([]rune(res.Text)))
+			return
+		}
+		stored := 0
+		for _, c := range candidates {
 			group := in.GroupOpenID
 			if s.ExpressionShareGlobal {
 				group = ""
@@ -306,9 +317,14 @@ func (d *Dispatcher) learnExpressions(ctx context.Context, conversationID string
 				GroupOpenID: group, Situation: c.Situation, Style: c.Style,
 				Source: "learn", Enabled: !s.ExpressionReviewEnabled,
 			}); err != nil {
-				d.log.Debug("failed to store expression", "component", "expression", "error", err.Error())
+				d.log.Warn("failed to store expression", "component", "expression", "error", err.Error())
+				continue
 			}
+			stored++
 		}
+		d.log.Info("expression learning: stored candidates", "component", "expression",
+			"conversation", conversationID, "candidates", len(candidates), "stored", stored,
+			"review", s.ExpressionReviewEnabled)
 	}()
 }
 
