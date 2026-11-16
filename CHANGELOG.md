@@ -5,6 +5,15 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.4.12] - 2026-11-16
+
+### Added
+
+- 新增 `render_markdown` 工具：模型可把 Markdown（标题、段落、列表、引用、代码块、表格）
+  渲染成 PNG 并发送到当前会话；用户用消息要求排版/出图即可触发。
+- `internal/render` 新增 Markdown 渲染器，单图 5 MB 上限；工具图片走主动消息，
+  不占用正式答复的 passive 序号。
+
 ## [Unreleased]
 
 ### Added

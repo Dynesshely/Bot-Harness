@@ -55,7 +55,10 @@ type Env struct {
 	AdminCount int
 	// Now lets tests pin the clock.
 	Now time.Time
-	Log *slog.Logger
+	// SendImage delivers a rendered PNG to the current conversation. Core
+	// injects it; tools that only compute leave it nil.
+	SendImage func(ctx context.Context, png []byte, alt string) error
+	Log       *slog.Logger
 }
 
 // Clock returns the env clock, falling back to the wall clock.

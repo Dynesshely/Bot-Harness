@@ -127,7 +127,7 @@ QQ 开放平台 ── WS / Webhook ──▶ internal/qq ──▶ internal/cor
                                                    │
                                                    ├─ internal/store   (PostgreSQL / SQLite；summaries / expressions / affect / join 数据)
                                                    ├─ internal/tools   (工具循环、SSRF 防线、run_shell)
-                                                   ├─ internal/render  (表格 PNG、内嵌字体)
+                                                   ├─ internal/render  (表格 / Markdown PNG、内嵌字体)
                                                    ├─ internal/ai      (chat / embeddings)
                                                    └─ core/*           (join gate、防抖、人味、表达库、compact、记忆、承诺、主动、情绪)
 
@@ -266,6 +266,7 @@ QQ 附件 URL 会过期，所以入站即抓回本地，按 sha256 内容寻址�
 |---|---|---|
 | `web_search` / `web_fetch` | 开（需 SearxNG） | 内网 / 云元数据 / 回环地址被 SSRF 策略拦截 |
 | 图片理解 `view_image` / 多模态 | 开 | 图片只发给配置的视觉端点；失败返回文本 |
+| Markdown 转图片 `render_markdown` | 开 | 模型按需渲染长文 / 表格并发图；单图上限 5 MB；图片作为主动消息发送 |
 | 长期记忆 | 开 | 按会话 / 群 / 全局隔离；后台可删；不写用户画像 |
 | 定时任务 / 承诺追问 | 开 | 每条承诺可收口；提醒有频率与上限 |
 | 主动消息 | 关 | 按群 opt-in，额度 + 静默时段 + 最小间隔；冷场不插嘴 |
@@ -396,7 +397,7 @@ curl -s -H "Authorization: Bearer <token>" localhost:8080/api/status
 
 ## 版本与兼容
 
-当前版本 **0.4.11**。`0.x` 阶段 API 与配置键可能继续演进；破坏性变更会写入
+当前版本 **0.4.12**。`0.x` 阶段 API 与配置键可能继续演进；破坏性变更会写入
 [CHANGELOG.md](CHANGELOG.md) 与 [docs/DECISIONS.md](docs/DECISIONS.md)。
 
 - 完整变更：[CHANGELOG.md](CHANGELOG.md)
