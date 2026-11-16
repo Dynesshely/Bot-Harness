@@ -398,6 +398,19 @@ func (d *Dispatcher) WarmGroupNames(ctx context.Context) {
 	}
 }
 
+// botUsername returns the bot's own nickname, if the identity lookup has
+// already succeeded (or can succeed now). Empty means "unknown"; callers must
+// omit the identity block rather than printing a placeholder.
+func (d *Dispatcher) botUsername(ctx context.Context) string {
+	if d.identity == nil {
+		return ""
+	}
+	if me := d.identity.Me(ctx); me != nil {
+		return strings.TrimSpace(me.Username)
+	}
+	return ""
+}
+
 // WarmIdentity resolves the bot's own identity so the admin panel can show it
 // without waiting for a group to fall back to the username comparison.
 func (d *Dispatcher) WarmIdentity(ctx context.Context) {

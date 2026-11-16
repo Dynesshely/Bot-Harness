@@ -176,6 +176,17 @@ func sessionIdentityBlock(in *Inbound) string {
 		"管理员让你调整本群（或某个群）的设置时，用这个 OpenID 作为标识。", in.GroupOpenID)
 }
 
+// botIdentityBlock tells the model its own nickname. Without it the model has
+// no way to recognise "Kaku, what do you think?" or to treat a name mention as
+// addressed to itself.
+func botIdentityBlock(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	return fmt.Sprintf("【你的身份】你的名字是「%s」。用户提到这个名字、或称呼「机器人」「bot」时，是在叫你。", name)
+}
+
 // effectiveContextLimit is the smaller of the configured logical budget and
 // the provider context window, so a 1M setting cannot be sent to a 128k model.
 func effectiveContextLimit(s settings.Settings) int {

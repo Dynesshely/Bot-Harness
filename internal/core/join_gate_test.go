@@ -52,6 +52,16 @@ func TestJoinGateSystemPromptCarriesTheContract(t *testing.T) {
 	}
 }
 
+func TestJoinGatePromptCarriesBotName(t *testing.T) {
+	got := joinGatePromptFor("Kaku")
+	if !strings.Contains(got, "Kaku") || !strings.Contains(got, "机器人") {
+		t.Fatalf("prompt lost the bot identity: %q", got)
+	}
+	if joinGatePromptFor("") != joinGateSystemPrompt {
+		t.Fatal("empty name must leave the base prompt byte-identical")
+	}
+}
+
 func TestParseJoinGateOutputAcceptsSurroundingProse(t *testing.T) {
 	raw := "好的，判断如下：\n" + `{"topics":[{"id":"t1","title":"性能问题","summary":"群里在讨论慢查询","message_ids":[12,13],"type":"question"}],"current_topic_id":"t1","addressed_to":"group","action":"join","confidence":0.82,"reason":"有人明确求助"}` + "\n以上。"
 	got, err := parseJoinGateOutput(raw, map[int64]bool{12: true, 13: true})
