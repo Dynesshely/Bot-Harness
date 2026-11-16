@@ -251,7 +251,7 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	// 人味增强的最后两道工序：中→英→中两次干净翻译。只在人味档位开启且
 	// 显式启用翻译回环时运行；任何失败都保留润色稿，不让增强变成故障。
 	translateUsage := ai.Usage{}
-	if cfg.HumanizeTranslateEnabled && cfg.HumanizeLevel != "off" {
+	if cfg.HumanizeTranslateEnabled {
 		tr := d.translateRoundTrip(aiCtx, s, sentText)
 		if tr.Attempted {
 			d.metrics.HumanizeTranslateRequests.Add(1)

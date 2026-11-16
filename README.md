@@ -228,7 +228,7 @@ QQ 附件 URL 会过期，所以入站即抓回本地，按 sha256 内容寻址�
 | 能力 | 默认 | 说明 |
 |---|---|---|
 | 人味档位 `humanize_level` | medium | off / soft / medium / strong，控制停顿与沉默概率 |
-| 翻译回环 `humanize_translate_enabled` | **关** | 人味非 off 时，润色后中→英→中两次干净翻译；失败保留润色稿 |
+| 翻译回环 `humanize_translate_enabled` | **关** | 润色后中→英→中两次干净翻译；失败保留润色稿 |
 | 分段气泡 `humanize_segment_split` | medium | 1–3 条；off = 一条发完 |
 | 打字速度 | 0.3s/字 × 0.5 | 每条气泡前等待；英文减半，整轮上限 12 秒 |
 | 口吻轮换 `reply_style_variants` | 空 | 每轮按概率抽一条备用风格 |

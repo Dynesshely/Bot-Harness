@@ -10,7 +10,7 @@
 ### Added
 
 - 人味翻译回环：润色后再做「中文 → 英文 → 中文」两次干净的模型翻译，
-  默认关闭，可用 humanize_translate_enabled 开启；只在 humanize_level 非 off 时运行。
+  默认关闭，可用 humanize_translate_enabled 开启；
   任一步失败都保留润色稿，不阻断发送；翻译 token 计入回复页脚与统计。
 
 ## [0.4.12] - 2026-11-16
