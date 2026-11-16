@@ -6,6 +6,31 @@ import (
 	"testing"
 )
 
+func TestBotNameComesFromQQAPI(t *testing.T) {
+	h := newHarness(t)
+	h.mu.Lock()
+	h.botUsername = "Nova"
+	h.mu.Unlock()
+	h.dis.HandlePayload(context.Background(), groupAtMessage("NAME3", "G1", "U1", "小明", "你叫什么名字"))
+	h.waitForSent(t, 1)
+
+	h.mu.Lock()
+	body := h.lastAIBody
+	h.mu.Unlock()
+	msgs, _ := body["messages"].([]any)
+	var system string
+	for _, raw := range msgs {
+		m, _ := raw.(map[string]any)
+		if m["role"] == "system" {
+			system, _ = m["content"].(string)
+			break
+		}
+	}
+	if !strings.Contains(system, "Nova") {
+		t.Fatalf("system prompt must use the API username: %q", system)
+	}
+}
+
 func TestBotNameMentionRepliesWithoutAt(t *testing.T) {
 	h := newHarness(t)
 	h.dis.HandlePayload(context.Background(), groupAnyMessage("NAME2", "G1", "U1", "醉月酿星河", "kaku，你在吗"))

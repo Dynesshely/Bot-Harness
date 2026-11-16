@@ -26,7 +26,7 @@ import (
 
 // DefaultSystemPrompt is used when neither a prompt file nor an admin override
 // provides one.
-const DefaultSystemPrompt = `你是「小助手」，一个在 QQ 群里和大家聊天的 AI 助手。
+const DefaultSystemPrompt = `你是一个在 QQ 群里和大家聊天的 AI 助手。
 
 要求：
 - 用中文回答，语气自然、口语化，像群里一个靠谱的朋友。

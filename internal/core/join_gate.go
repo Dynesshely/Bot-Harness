@@ -136,7 +136,7 @@ confidence 是 0 到 1 的小数；reason 用一句中文说明依据，最多 2
 {"topics":[{"id":"t1","title":"…","summary":"…","message_ids":[12,13],"type":"question","status":"active","resumable":true}],"current_topic_id":"t1","addressed_to":"group","action":"join","confidence":0.82,"reason":"…"}`
 
 // joinGatePromptFor prepends the bot's own nickname. Without this the gate
-// model sees "Kaku, what do you think?" but has no idea Kaku is itself, so it
+// model sees a direct name call but has no idea the name is itself, so it
 // classifies the message as addressed_to=someone_else and stays silent.
 func joinGatePromptFor(name string) string {
 	name = strings.TrimSpace(name)

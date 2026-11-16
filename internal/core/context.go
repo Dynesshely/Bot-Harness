@@ -177,7 +177,7 @@ func sessionIdentityBlock(in *Inbound) string {
 }
 
 // botIdentityBlock tells the model its own nickname. Without it the model has
-// no way to recognise "Kaku, what do you think?" or to treat a name mention as
+// no way to recognise a direct name call or to treat a name mention as
 // addressed to itself.
 func botIdentityBlock(name string) string {
 	name = strings.TrimSpace(name)
