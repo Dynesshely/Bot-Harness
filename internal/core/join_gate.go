@@ -77,13 +77,13 @@ const (
 	joinGateReasonRunes     = 200
 	joinGateMessageRunes    = 200
 	joinGatePreviewRunes    = 80
-	joinGateMaxTokens       = 600
+	joinGateMaxTokens       = 1500
 )
 
 // 调用的时间预算：拿不到并发额度就不评估（2s），单次调用 10s。
 const (
 	joinGateSemAcquireTimeout = 2 * time.Second
-	joinGateCallTimeout       = 10 * time.Second
+	joinGateCallTimeout       = 20 * time.Second
 )
 
 // 引用识别的读库预算：识别是回复的前置优化，绝不允许拖慢一条本来能发的消息。
@@ -134,6 +134,17 @@ confidence 是 0 到 1 的小数；reason 用一句中文说明依据，最多 2
   active 的话题按 addressed_to 判断。
 只输出 JSON，不要解释、不要 markdown：
 {"topics":[{"id":"t1","title":"…","summary":"…","message_ids":[12,13],"type":"question","status":"active","resumable":true}],"current_topic_id":"t1","addressed_to":"group","action":"join","confidence":0.82,"reason":"…"}`
+
+// joinGatePromptFor prepends the bot's own nickname. Without this the gate
+// model sees a direct name call but has no idea the name is itself, so it
+// classifies the message as addressed_to=someone_else and stays silent.
+func joinGatePromptFor(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return joinGateSystemPrompt
+	}
+	return fmt.Sprintf("你的名字是「%s」。用户提到这个名字、或称呼「机器人」「bot」时，是在叫你。\\n\\n%s", name, joinGateSystemPrompt)
+}
 
 // joinGateTopic / joinGateOutput mirror the JSON contract exactly.
 type joinGateTopic struct {
@@ -371,7 +382,7 @@ func (d *Dispatcher) maybeJoinGroupChat(ctx context.Context, in *Inbound, conv c
 	defer cancel()
 	res, err := d.ai.Chat(callCtx, ai.ChatRequest{
 		Model:       model,
-		Messages:    []ai.Message{{Role: ai.RoleSystem, Content: joinGateSystemPrompt}, {Role: ai.RoleUser, Content: contextText}},
+		Messages:    []ai.Message{{Role: ai.RoleSystem, Content: joinGatePromptFor(d.botUsername(ctx))}, {Role: ai.RoleUser, Content: contextText}},
 		Temperature: 0.1,
 		MaxTokens:   joinGateMaxTokens,
 		Stream:      false,

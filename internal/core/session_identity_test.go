@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func TestBotIdentityBlockCarriesName(t *testing.T) {
+	if got := botIdentityBlock("Kaku"); !strings.Contains(got, "Kaku") || !strings.Contains(got, "机器人") {
+		t.Fatalf("bot identity block = %q", got)
+	}
+	if botIdentityBlock("  ") != "" {
+		t.Fatal("empty name must omit the block")
+	}
+}
+
 func TestSessionIdentityBlock(t *testing.T) {
 	group := sessionIdentityBlock(&Inbound{Scene: "group", GroupOpenID: "GROUP_OPENID"})
 	if !strings.Contains(group, "GROUP_OPENID") || !strings.Contains(group, "群聊") {

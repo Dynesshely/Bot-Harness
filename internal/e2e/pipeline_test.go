@@ -93,6 +93,10 @@ type harness struct {
 	// aiProactiveReply is what the fake model returns for the spontaneous-message
 	// reflection prompt.
 	aiProactiveReply string
+	// botUsername is returned by the fake /users/@me endpoint. Tests that need
+	// to prove the name comes from the API set it to something other than the
+	// default.
+	botUsername string
 	// aiExtractReply is what the fake model returns for the memory-extraction prompt.
 	aiExtractReply string
 	// aiExpressionReply is what the fake model returns for the expression-learn prompt.
@@ -175,8 +179,14 @@ func newHarness(t *testing.T) *harness {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w, `{"member_openid":%q,"recv_msg_setting":%q,"allow_proactive_msg":%t,"member_role":"member"}`, openID, setting, proactive)
 		case r.URL.Path == "/users/@me":
+			h.mu.Lock()
+			username := h.botUsername
+			h.mu.Unlock()
+			if username == "" {
+				username = "Kaku"
+			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":"2356171532736147183","username":"Kaku"}`))
+			_, _ = fmt.Fprintf(w, `{"id":"2356171532736147183","username":%q}`, username)
 		case r.URL.Path == "/gateway/bot":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"url":"wss://example.invalid/websocket","shards":1}`))
@@ -4979,8 +4989,8 @@ func TestJoinGateUsesConfiguredModelAndParameters(t *testing.T) {
 	if got, _ := body["temperature"].(float64); got != 0.1 {
 		t.Fatalf("gate temperature = %v, want 0.1", got)
 	}
-	if got, _ := body["max_tokens"].(float64); got != 600 {
-		t.Fatalf("gate max_tokens = %v, want 600", got)
+	if got, _ := body["max_tokens"].(float64); got != 1500 {
+		t.Fatalf("gate max_tokens = %v, want 1500", got)
 	}
 }
 

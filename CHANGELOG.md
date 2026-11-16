@@ -9,6 +9,8 @@
 
 ### Added
 
+- 模型身份注入：`/users/@me` 的昵称进入主系统提示与 join gate 系统提示；
+  用户点名或称呼「机器人 / bot」时，模型能识别是在叫自己并参与对话。
 - 新增 `render_markdown` 工具：模型可把 Markdown（标题、段落、列表、引用、代码块、表格）
   渲染成 PNG 并发送到当前会话；用户用消息要求排版/出图即可触发。
 - `internal/render` 新增 Markdown 渲染器，单图 5 MB 上限；工具图片走主动消息，

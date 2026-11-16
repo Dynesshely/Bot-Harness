@@ -83,6 +83,9 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 	if identityBlock := sessionIdentityBlock(in); identityBlock != "" {
 		systemPrompt = appendSystemBlock(systemPrompt, identityBlock)
 	}
+	if identityBlock := botIdentityBlock(d.botUsername(ctx)); identityBlock != "" {
+		systemPrompt = appendSystemBlock(systemPrompt, identityBlock)
+	}
 	// 表达方式库：只在本群范围内召回，注入位置在人设/口吻之后、记忆之前。
 	if block := d.expressionBlock(ctx, in, s, userText); block != "" {
 		systemPrompt = appendSystemBlock(systemPrompt, block)

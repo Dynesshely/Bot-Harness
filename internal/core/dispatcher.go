@@ -26,7 +26,7 @@ import (
 
 // DefaultSystemPrompt is used when neither a prompt file nor an admin override
 // provides one.
-const DefaultSystemPrompt = `你是「小助手」，一个在 QQ 群里和大家聊天的 AI 助手。
+const DefaultSystemPrompt = `你是一个在 QQ 群里和大家聊天的 AI 助手。
 
 要求：
 - 用中文回答，语气自然、口语化，像群里一个靠谱的朋友。
@@ -265,6 +265,17 @@ func (d *Dispatcher) Start(ctx context.Context) {
 }
 
 // truncateForLog bounds a raw payload so a sample cannot flood the log.
+// mentionsBotName reports a case-insensitive, whole-string name mention. Names
+// shorter than two runes are ignored: a one-character nickname would match
+// almost every sentence.
+func mentionsBotName(content, name string) bool {
+	name = strings.TrimSpace(name)
+	if len([]rune(name)) < 2 {
+		return false
+	}
+	return strings.Contains(strings.ToLower(content), strings.ToLower(name))
+}
+
 func truncateForLog(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
@@ -398,6 +409,19 @@ func (d *Dispatcher) WarmGroupNames(ctx context.Context) {
 	}
 }
 
+// botUsername returns the bot's own nickname, if the identity lookup has
+// already succeeded (or can succeed now). Empty means "unknown"; callers must
+// omit the identity block rather than printing a placeholder.
+func (d *Dispatcher) botUsername(ctx context.Context) string {
+	if d.identity == nil {
+		return ""
+	}
+	if me := d.identity.Me(ctx); me != nil {
+		return strings.TrimSpace(me.Username)
+	}
+	return ""
+}
+
 // WarmIdentity resolves the bot's own identity so the admin panel can show it
 // without waiting for a group to fall back to the username comparison.
 func (d *Dispatcher) WarmIdentity(ctx context.Context) {
@@ -522,6 +546,17 @@ func (d *Dispatcher) DispatchMessage(ctx context.Context, p *qq.Payload, ev *qq.
 		}
 	}
 	addressedToBot := explicitAt || selfMentioned
+	// A name mention is addressing, even without an @. The gate model also
+	// sees the name, but this cheap check keeps the bot responsive when the
+	// gate's lightweight model is slow or reasoning-only.
+	if !addressedToBot && !ev.Author.Bot {
+		if name := d.botUsername(bgctx); mentionsBotName(ev.Text(), name) {
+			addressedToBot = true
+			d.log.Info("message mentions the bot name; treating it as addressed",
+				"component", "dispatch", "group_openid", ev.GroupOpenID,
+				"member", ev.Author.DisplayName(), "bot_name", name)
+		}
+	}
 
 	if p.T == qq.EventGroupMessageCreate {
 		if d.fullGroupSeen.CompareAndSwap(false, true) {
