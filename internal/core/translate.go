@@ -77,8 +77,8 @@ func (d *Dispatcher) translateOnce(ctx context.Context, s settings.Settings, mod
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	maxTokens := EstimateTokens(text)*2 + 64
-	if maxTokens < 512 {
-		maxTokens = 512
+	if maxTokens < 2048 {
+		maxTokens = 2048
 	}
 	if s.MaxTokens > 0 && maxTokens > s.MaxTokens {
 		maxTokens = s.MaxTokens
