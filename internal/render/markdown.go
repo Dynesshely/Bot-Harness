@@ -73,11 +73,11 @@ func (b *mdBuild) gap() {
 }
 
 var (
-	mdHeading  = regexp.MustCompile("^(#{1,6})\\s+(.*)$")
-	mdList     = regexp.MustCompile("^([-*+]|\\d+[.)])\\s+(.*)$")
-	mdLink     = regexp.MustCompile("\\[([^\\]]+)\\]\\([^)]*\\)")
-	mdImage    = regexp.MustCompile("!\\[([^\\]]*)\\]\\([^)]*\\)")
-	mdTableSep = regexp.MustCompile("^\\s*\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)*\\|?\\s*$")
+	mdHeading  = regexp.MustCompile(`^(#{1,6})\s+(.*)$`)
+	mdList     = regexp.MustCompile(`^([-*+]|\d+[.)])\s+(.*)$`)
+	mdLink     = regexp.MustCompile(`\[([^\]]+)\]\([^)]*\)`)
+	mdImage    = regexp.MustCompile(`!\[([^\]]*)\]\([^)]*\)`)
+	mdTableSep = regexp.MustCompile(`^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$`)
 )
 
 func mdInline(s string) string {
