@@ -236,6 +236,9 @@ func (d *Dispatcher) toolEnv(s settings.Settings, in *Inbound, conv convTarget) 
 		IsAdmin:        d.isAdmin(s, in),
 		AdminCount:     len(s.AdminOpenIDs),
 		Log:            d.log,
+		SendImage: func(ctx context.Context, png []byte, alt string) error {
+			return d.sendToolImage(ctx, in, conv, png, alt)
+		},
 	}
 }
 

@@ -206,6 +206,7 @@ func New(opts Options) *Dispatcher {
 	// view_image 需要媒体缓存与 AI 客户端；vision_enabled 在调用时再判一次，
 	// 所以后台开关切换不需要重启，关闭时也不会向模型声明这个工具。
 	if d.media != nil && d.ai != nil {
+		d.tools.Register(tools.NewRenderMarkdown())
 		d.tools.Register(tools.NewViewImage(d.media, d.ai, func() tools.VisionConfig {
 			s := d.settings.Effective()
 			return tools.VisionConfig{Enabled: s.VisionEnabled, Model: s.HumanStatusVisionModel, FallbackModel: s.Model}

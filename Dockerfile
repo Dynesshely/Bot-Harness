@@ -20,7 +20,7 @@ RUN pnpm build
 
 # --- stage 2: build the Go binary -------------------------------------------
 FROM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS build
-ARG VERSION=0.4.11
+ARG VERSION=0.4.12
 # Module proxy is overridable for mirrors / locked-down networks. The default
 # matches the Go toolchain; "direct" keeps a working fallback when
 # proxy.golang.org is unreachable.
@@ -44,7 +44,7 @@ RUN go build -trimpath -tags netgo \
 # subcommand, and Go handles SIGTERM directly. That keeps the runtime image
 # buildable even where apk's HTTPS fetches are blocked by a proxy.
 FROM alpine:3.21@sha256:87a4361f6c819618a6bafa2ed5228714cb0bb22195d2b49c95eb26799990128a AS runtime
-ARG VERSION=0.4.11
+ARG VERSION=0.4.12
 LABEL org.opencontainers.image.title="bot-harness" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.description="QQ group AI chat bot with a built-in admin panel" \
