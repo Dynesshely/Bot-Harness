@@ -43,6 +43,7 @@ export interface EditableDraft {
   exec_timeout_seconds: number
   exec_max_output_bytes: number
   humanize_level: string
+  humanize_translate_enabled: boolean
   humanize_delay_scale: number
   /** 分段气泡档位 off/soft/medium/strong；off = 一条发完。 */
   humanize_segment_split: string
@@ -231,6 +232,7 @@ export function emptyDraft(): EditableDraft {
     exec_timeout_seconds: 15,
     exec_max_output_bytes: 8192,
     humanize_level: 'medium',
+    humanize_translate_enabled: false,
     humanize_delay_scale: 1,
     humanize_segment_split: 'medium',
     humanize_typing_seconds_per_char: 0.3,
@@ -493,6 +495,7 @@ export function assign(target: EditableDraft, source: EditableConfig | EditableD
   target.humanize_segment_split = source.humanize_segment_split ?? 'medium'
   target.humanize_typing_seconds_per_char = source.humanize_typing_seconds_per_char ?? 0.3
   target.humanize_typing_max_seconds = source.humanize_typing_max_seconds ?? 12
+  target.humanize_translate_enabled = source.humanize_translate_enabled ?? false
   target.reply_debounce_mode = source.reply_debounce_mode ?? 'natural'
   target.reply_debounce_quiet_seconds = source.reply_debounce_quiet_seconds ?? 2
   target.reply_debounce_active_seconds = source.reply_debounce_active_seconds ?? 5
@@ -776,6 +779,9 @@ export function buildPatch(draft: EditableDraft, base: EditableDraft): Partial<E
   }
   // 两阶段生成：布尔 false 是真实值（关掉润色），照发；空串的 polish_model 也是真实值
   // （= 改回「使用主模型」），和秘密字段的「空 = 没动」不同。
+  if (draft.humanize_translate_enabled !== base.humanize_translate_enabled) {
+    changed.humanize_translate_enabled = draft.humanize_translate_enabled
+  }
   if (draft.polish_enabled !== base.polish_enabled) {
     changed.polish_enabled = draft.polish_enabled
   }

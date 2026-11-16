@@ -37,6 +37,10 @@ type Metrics struct {
 	// draft had to be sent instead.
 	PolishRequests  atomic.Int64
 	PolishFallbacks atomic.Int64
+	// HumanizeTranslateRequests counts attempted translation round-trips;
+	// Fallbacks counts those that kept the polished text.
+	HumanizeTranslateRequests  atomic.Int64
+	HumanizeTranslateFallbacks atomic.Int64
 	// Debounce counters: batches = group windows that merged messages,
 	// messages = extra messages folded into a batch leader.
 	ReplyDebouncedBatches  atomic.Int64
@@ -85,40 +89,42 @@ type Metrics struct {
 
 // CounterSnapshot is the JSON shape of Metrics.
 type CounterSnapshot struct {
-	EventsReceived         int64 `json:"events_received"`
-	EventsDeduped          int64 `json:"events_deduped"`
-	EventsIgnored          int64 `json:"events_ignored"`
-	RepliesSent            int64 `json:"replies_sent"`
-	RepliesFailed          int64 `json:"replies_failed"`
-	EarlyRepliesSent       int64 `json:"early_replies_sent"`
-	MessagesObserved       int64 `json:"messages_observed"`
-	EarlyRepliesRecalled   int64 `json:"early_replies_recalled"`
-	AIRequests             int64 `json:"ai_requests"`
-	TurnsStarted           int64 `json:"turns_started"`
-	TurnLatencyAvgMS       int64 `json:"turn_latency_avg_ms"`
-	AIErrors               int64 `json:"ai_errors"`
-	TokensUsed             int64 `json:"tokens_used"`
-	PolishRequests         int64 `json:"polish_requests"`
-	PolishFallbacks        int64 `json:"polish_fallbacks"`
-	ReplyDebouncedBatches  int64 `json:"reply_debounced_batches"`
-	ReplyDebouncedMessages int64 `json:"reply_debounced_messages"`
-	CommitmentNudges       int64 `json:"commitment_nudges"`
-	CommitmentAcked        int64 `json:"commitment_acked"`
-	CommitmentPostponed    int64 `json:"commitment_postponed"`
-	HumanStatusRuns        int64 `json:"human_status_runs"`
-	HumanStatusFailures    int64 `json:"human_status_failures"`
-	HumanStatusImageCalls  int64 `json:"human_status_image_calls"`
-	AffectTicks            int64 `json:"affect_ticks"`
-	AffectEvents           int64 `json:"affect_events"`
-	AffectInjections       int64 `json:"affect_injections"`
-	AffectInjectChars      int64 `json:"affect_inject_chars"`
-	AffectErrors           int64 `json:"affect_errors"`
-	JoinGateEvals          int64 `json:"join_gate_evals"`
-	JoinGateJoins          int64 `json:"join_gate_joins"`
-	JoinGateSkips          int64 `json:"join_gate_skips"`
-	JoinGateWaits          int64 `json:"join_gate_waits"`
-	JoinGateErrors         int64 `json:"join_gate_errors"`
-	JoinGateTopics         int64 `json:"join_gate_topics"`
+	EventsReceived             int64 `json:"events_received"`
+	EventsDeduped              int64 `json:"events_deduped"`
+	EventsIgnored              int64 `json:"events_ignored"`
+	RepliesSent                int64 `json:"replies_sent"`
+	RepliesFailed              int64 `json:"replies_failed"`
+	EarlyRepliesSent           int64 `json:"early_replies_sent"`
+	MessagesObserved           int64 `json:"messages_observed"`
+	EarlyRepliesRecalled       int64 `json:"early_replies_recalled"`
+	AIRequests                 int64 `json:"ai_requests"`
+	TurnsStarted               int64 `json:"turns_started"`
+	TurnLatencyAvgMS           int64 `json:"turn_latency_avg_ms"`
+	AIErrors                   int64 `json:"ai_errors"`
+	TokensUsed                 int64 `json:"tokens_used"`
+	PolishRequests             int64 `json:"polish_requests"`
+	PolishFallbacks            int64 `json:"polish_fallbacks"`
+	HumanizeTranslateRequests  int64 `json:"humanize_translate_requests"`
+	HumanizeTranslateFallbacks int64 `json:"humanize_translate_fallbacks"`
+	ReplyDebouncedBatches      int64 `json:"reply_debounced_batches"`
+	ReplyDebouncedMessages     int64 `json:"reply_debounced_messages"`
+	CommitmentNudges           int64 `json:"commitment_nudges"`
+	CommitmentAcked            int64 `json:"commitment_acked"`
+	CommitmentPostponed        int64 `json:"commitment_postponed"`
+	HumanStatusRuns            int64 `json:"human_status_runs"`
+	HumanStatusFailures        int64 `json:"human_status_failures"`
+	HumanStatusImageCalls      int64 `json:"human_status_image_calls"`
+	AffectTicks                int64 `json:"affect_ticks"`
+	AffectEvents               int64 `json:"affect_events"`
+	AffectInjections           int64 `json:"affect_injections"`
+	AffectInjectChars          int64 `json:"affect_inject_chars"`
+	AffectErrors               int64 `json:"affect_errors"`
+	JoinGateEvals              int64 `json:"join_gate_evals"`
+	JoinGateJoins              int64 `json:"join_gate_joins"`
+	JoinGateSkips              int64 `json:"join_gate_skips"`
+	JoinGateWaits              int64 `json:"join_gate_waits"`
+	JoinGateErrors             int64 `json:"join_gate_errors"`
+	JoinGateTopics             int64 `json:"join_gate_topics"`
 }
 
 func averageMS(sum, count int64) int64 {
@@ -131,40 +137,42 @@ func averageMS(sum, count int64) int64 {
 // Snapshot returns the current counter values.
 func (m *Metrics) Snapshot() CounterSnapshot {
 	return CounterSnapshot{
-		EventsReceived:         m.EventsReceived.Load(),
-		EventsDeduped:          m.EventsDeduped.Load(),
-		EventsIgnored:          m.EventsIgnored.Load(),
-		RepliesSent:            m.RepliesSent.Load(),
-		RepliesFailed:          m.RepliesFailed.Load(),
-		EarlyRepliesSent:       m.EarlyRepliesSent.Load(),
-		MessagesObserved:       m.MessagesObserved.Load(),
-		EarlyRepliesRecalled:   m.EarlyRepliesRecalled.Load(),
-		AIRequests:             m.AIRequests.Load(),
-		TurnsStarted:           m.TurnsStarted.Load(),
-		TurnLatencyAvgMS:       averageMS(m.TurnLatencySumMS.Load(), m.TurnLatencyCount.Load()),
-		AIErrors:               m.AIErrors.Load(),
-		TokensUsed:             m.TokensUsed.Load(),
-		PolishRequests:         m.PolishRequests.Load(),
-		PolishFallbacks:        m.PolishFallbacks.Load(),
-		ReplyDebouncedBatches:  m.ReplyDebouncedBatches.Load(),
-		ReplyDebouncedMessages: m.ReplyDebouncedMessages.Load(),
-		CommitmentNudges:       m.CommitmentNudges.Load(),
-		CommitmentAcked:        m.CommitmentAcked.Load(),
-		CommitmentPostponed:    m.CommitmentPostponed.Load(),
-		HumanStatusRuns:        m.HumanStatusRuns.Load(),
-		HumanStatusFailures:    m.HumanStatusFailures.Load(),
-		HumanStatusImageCalls:  m.HumanStatusImageCalls.Load(),
-		AffectTicks:            m.AffectTicks.Load(),
-		AffectEvents:           m.AffectEvents.Load(),
-		AffectInjections:       m.AffectInjections.Load(),
-		AffectInjectChars:      m.AffectInjectChars.Load(),
-		AffectErrors:           m.AffectErrors.Load(),
-		JoinGateEvals:          m.JoinGateEvals.Load(),
-		JoinGateJoins:          m.JoinGateJoins.Load(),
-		JoinGateSkips:          m.JoinGateSkips.Load(),
-		JoinGateWaits:          m.JoinGateWaits.Load(),
-		JoinGateErrors:         m.JoinGateErrors.Load(),
-		JoinGateTopics:         m.JoinGateTopics.Load(),
+		EventsReceived:             m.EventsReceived.Load(),
+		EventsDeduped:              m.EventsDeduped.Load(),
+		EventsIgnored:              m.EventsIgnored.Load(),
+		RepliesSent:                m.RepliesSent.Load(),
+		RepliesFailed:              m.RepliesFailed.Load(),
+		EarlyRepliesSent:           m.EarlyRepliesSent.Load(),
+		MessagesObserved:           m.MessagesObserved.Load(),
+		EarlyRepliesRecalled:       m.EarlyRepliesRecalled.Load(),
+		AIRequests:                 m.AIRequests.Load(),
+		TurnsStarted:               m.TurnsStarted.Load(),
+		TurnLatencyAvgMS:           averageMS(m.TurnLatencySumMS.Load(), m.TurnLatencyCount.Load()),
+		AIErrors:                   m.AIErrors.Load(),
+		TokensUsed:                 m.TokensUsed.Load(),
+		PolishRequests:             m.PolishRequests.Load(),
+		PolishFallbacks:            m.PolishFallbacks.Load(),
+		HumanizeTranslateRequests:  m.HumanizeTranslateRequests.Load(),
+		HumanizeTranslateFallbacks: m.HumanizeTranslateFallbacks.Load(),
+		ReplyDebouncedBatches:      m.ReplyDebouncedBatches.Load(),
+		ReplyDebouncedMessages:     m.ReplyDebouncedMessages.Load(),
+		CommitmentNudges:           m.CommitmentNudges.Load(),
+		CommitmentAcked:            m.CommitmentAcked.Load(),
+		CommitmentPostponed:        m.CommitmentPostponed.Load(),
+		HumanStatusRuns:            m.HumanStatusRuns.Load(),
+		HumanStatusFailures:        m.HumanStatusFailures.Load(),
+		HumanStatusImageCalls:      m.HumanStatusImageCalls.Load(),
+		AffectTicks:                m.AffectTicks.Load(),
+		AffectEvents:               m.AffectEvents.Load(),
+		AffectInjections:           m.AffectInjections.Load(),
+		AffectInjectChars:          m.AffectInjectChars.Load(),
+		AffectErrors:               m.AffectErrors.Load(),
+		JoinGateEvals:              m.JoinGateEvals.Load(),
+		JoinGateJoins:              m.JoinGateJoins.Load(),
+		JoinGateSkips:              m.JoinGateSkips.Load(),
+		JoinGateWaits:              m.JoinGateWaits.Load(),
+		JoinGateErrors:             m.JoinGateErrors.Load(),
+		JoinGateTopics:             m.JoinGateTopics.Load(),
 	}
 }
 

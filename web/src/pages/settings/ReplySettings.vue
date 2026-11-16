@@ -56,6 +56,11 @@ const { draft } = useConfig()
               :options="HUMANIZE_LEVELS"
               hint="中等档：基础 0.8s + 每 10 字 0.6s（上限 8s），分段间隔约 0.65s，未 @ 时 10% 概率不插话。"
             />
+            <ToggleField
+              v-model="draft.humanize_translate_enabled"
+              label="翻译回环 humanize_translate_enabled"
+              hint="人味润色后再做一次中→英→中翻译；两次直接翻译，失败自动保留润色稿。"
+            />
             <NumberField
               v-model="draft.humanize_delay_scale"
               label="停顿倍数 humanize_delay_scale"

@@ -9,7 +9,7 @@ import (
 
 // groupOverrideFieldCount is the number of JSON fields on GroupOverride. Bumping
 // it is a reminder to extend overrideIsEmpty (and the manifest) as well.
-const groupOverrideFieldCount = 19
+const groupOverrideFieldCount = 20
 
 func boolPtr(v bool) *bool { return &v }
 
@@ -41,6 +41,7 @@ func TestOverrideIsEmptyCoversEveryGroupOverrideField(t *testing.T) {
 		{"tasks", GroupOverride{Tasks: boolPtr(false)}},
 		{"memory", GroupOverride{Memory: boolPtr(false)}},
 		{"humanize", GroupOverride{Humanize: strPtr("strong")}},
+		{"humanize_translate", GroupOverride{HumanizeTranslate: boolPtr(false)}},
 		{"affect", GroupOverride{Affect: boolPtr(false)}},
 		{"affect_inject_mode", GroupOverride{AffectInjectMode: strPtr("full")}},
 		{"polish", GroupOverride{Polish: boolPtr(false)}},
@@ -188,6 +189,7 @@ func TestGroupOverrideRoundTripsAllFields(t *testing.T) {
 		"tasks":false,
 		"memory":false,
 		"humanize":"strong",
+		"humanize_translate":false,
 		"affect":false,
 		"affect_inject_mode":"full",
 		"polish":false,
@@ -217,7 +219,8 @@ func TestGroupOverrideRoundTripsAllFields(t *testing.T) {
 			t.Fatalf("开关字段丢失：%#v", ov)
 		}
 		if ov.Proactive == nil || *ov.Proactive != "auto" ||
-			ov.Humanize == nil || *ov.Humanize != "strong" {
+			ov.Humanize == nil || *ov.Humanize != "strong" ||
+			ov.HumanizeTranslate == nil || *ov.HumanizeTranslate {
 			t.Fatalf("档位字段丢失：%#v", ov)
 		}
 		if ov.Affect == nil || *ov.Affect ||

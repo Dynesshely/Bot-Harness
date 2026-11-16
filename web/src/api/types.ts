@@ -326,6 +326,7 @@ export interface EditableConfig {
 
   /** 人味：回复节奏与风格（off/soft/medium/strong）。 */
   humanize_level?: string
+  humanize_translate_enabled?: boolean
   humanize_delay_scale?: number
   /** 分段气泡档位 off/soft/medium/strong。 */
   humanize_segment_split?: string
@@ -459,6 +460,7 @@ export interface GroupOverride {
   memory?: boolean | null
   /** 该群人味档位（off / soft / medium / strong）。 */
   humanize?: string | null
+  humanize_translate?: boolean | null
   /** 该群联网工具开关。 */
   web?: boolean | null
   /** 该群容器内执行开关。 */
