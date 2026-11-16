@@ -248,12 +248,31 @@ func (d *Dispatcher) processMessage(ctx context.Context, in *Inbound, cfg settin
 			"conversation", conv.ID)
 	}
 	sentText := polish.Text
-	// 页脚用总 token：stage1 全程（含工具步）的 usage 加上 stage2 的 usage。
+	// 人味增强的最后两道工序：中→英→中两次干净翻译。只在人味档位开启且
+	// 显式启用翻译回环时运行；任何失败都保留润色稿，不让增强变成故障。
+	translateUsage := ai.Usage{}
+	if cfg.HumanizeTranslateEnabled && cfg.HumanizeLevel != "off" {
+		tr := d.translateRoundTrip(aiCtx, s, sentText)
+		if tr.Attempted {
+			d.metrics.HumanizeTranslateRequests.Add(1)
+		}
+		if tr.Translated {
+			sentText = tr.Text
+			d.log.Info("humanize translation round-trip applied", "component", "ai",
+				"latency_ms", tr.LatencyMS, "chars", len([]rune(sentText)), "conversation", conv.ID)
+		} else if tr.Attempted {
+			d.metrics.HumanizeTranslateFallbacks.Add(1)
+			d.log.Warn("humanize translation round-trip fell back", "component", "ai",
+				"reason", tr.Fallback, "latency_ms", tr.LatencyMS, "conversation", conv.ID)
+		}
+		translateUsage = tr.Usage
+	}
+	// 页脚用总 token：stage1 全程（含工具步）的 usage 加上 stage2 / 翻译的 usage。
 	stageUsage := outcome.usage.TotalTokens
 	if stageUsage <= 0 {
 		stageUsage = result.Usage.TotalTokens
 	}
-	totalTokens := stageUsage + polish.Usage.TotalTokens
+	totalTokens := stageUsage + polish.Usage.TotalTokens + translateUsage.TotalTokens
 	d.log.Info("two-stage reply", "component", "ai",
 		"draft_chars", len([]rune(draft)),
 		"polish_chars", len([]rune(sentText)),

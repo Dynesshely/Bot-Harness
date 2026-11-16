@@ -228,6 +228,7 @@ QQ 附件 URL 会过期，所以入站即抓回本地，按 sha256 内容寻址�
 | 能力 | 默认 | 说明 |
 |---|---|---|
 | 人味档位 `humanize_level` | medium | off / soft / medium / strong，控制停顿与沉默概率 |
+| 翻译回环 `humanize_translate_enabled` | **关** | 人味非 off 时，润色后中→英→中两次干净翻译；失败保留润色稿 |
 | 分段气泡 `humanize_segment_split` | medium | 1–3 条；off = 一条发完 |
 | 打字速度 | 0.3s/字 × 0.5 | 每条气泡前等待；英文减半，整轮上限 12 秒 |
 | 口吻轮换 `reply_style_variants` | 空 | 每轮按概率抽一条备用风格 |
@@ -397,7 +398,7 @@ curl -s -H "Authorization: Bearer <token>" localhost:8080/api/status
 
 ## 版本与兼容
 
-当前版本 **0.4.12**。`0.x` 阶段 API 与配置键可能继续演进；破坏性变更会写入
+当前版本 **0.4.13**。`0.x` 阶段 API 与配置键可能继续演进；破坏性变更会写入
 [CHANGELOG.md](CHANGELOG.md) 与 [docs/DECISIONS.md](docs/DECISIONS.md)。
 
 - 完整变更：[CHANGELOG.md](CHANGELOG.md)

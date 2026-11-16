@@ -119,6 +119,7 @@ type harness struct {
 	// the system-message marker, exactly like the polish/commitment calls.
 	joinGateReply    string
 	joinGateCalls    int
+	translateCalls   int
 	lastJoinGateBody map[string]any
 	// aiRejectTools makes the fake upstream answer HTTP 400 whenever the request
 	// carries a tools array (a gateway that does not support tool calling).
@@ -266,6 +267,28 @@ func newHarness(t *testing.T) *harness {
 		}
 		if isPolishRequest(body) {
 			h.servePolish(w, body, streaming)
+			return
+		}
+		// 人味翻译回环：两轮都走干净翻译，第一轮目标英文、第二轮目标中文。
+		if hasSystemText(body, "你是专业翻译") {
+			h.mu.Lock()
+			h.translateCalls++
+			h.mu.Unlock()
+			var user string
+			if msgs, ok := body["messages"].([]any); ok {
+				for i := len(msgs) - 1; i >= 0; i-- {
+					m, _ := msgs[i].(map[string]any)
+					if m["role"] == "user" {
+						user, _ = m["content"].(string)
+						break
+					}
+				}
+			}
+			if strings.Contains(user, "英文") {
+				writeJSONCompletion(w, "Hello, human.")
+			} else {
+				writeJSONCompletion(w, "你好，人类。")
+			}
 			return
 		}
 		// 自主加入判断：系统提示里带固定标记，返回 JSON 判定（不是一条回复）。

@@ -105,6 +105,8 @@ type GroupOverride struct {
 	Affect *bool `json:"affect,omitempty"`
 	// AffectInjectMode 覆盖本群的注入档位（off/line/full，空 = 跟随全局）。
 	AffectInjectMode *string `json:"affect_inject_mode,omitempty"`
+	// HumanizeTranslate 覆盖本群的翻译回环（nil = 跟随全局）。
+	HumanizeTranslate *bool `json:"humanize_translate,omitempty"`
 	// Polish 覆盖本群的「两阶段生成」开关（nil = 跟随全局 polish_enabled）。
 	Polish *bool `json:"polish,omitempty"`
 	// JoinGate 覆盖本群的「自主加入」开关（nil = 跟随全局 join_gate_enabled）。
@@ -354,6 +356,10 @@ type Settings struct {
 	// Persona is one line of character description appended to the prompt.
 	Persona string `json:"persona"`
 
+	// HumanizeTranslateEnabled adds a translation round-trip after the humanize
+	// polish: Chinese → English → Chinese, with two clean model calls. It only
+	// runs when the humanize level is not off.
+	HumanizeTranslateEnabled bool `json:"humanize_translate_enabled"`
 	// PolishEnabled turns on the two-stage pipeline: the main model drafts an
 	// answer, then a context-free polish call rewrites that draft in character.
 	// When off, the draft is delivered unchanged.
@@ -1223,20 +1229,21 @@ func derefLevel(v *string) string {
 func (m *Manager) GroupConfig(groupOpenID string) GroupConfig {
 	s := m.Get()
 	cfg := GroupConfig{
-		Enabled:          true,
-		TriggerMode:      s.TriggerMode,
-		ContextMode:      s.ContextMode,
-		ContextScope:     s.ContextScope,
-		ReplyToBots:      s.ReplyToBots,
-		QuoteReply:       s.QuoteReply,
-		QuoteReplyMode:   s.QuoteReplyMode,
-		ToolsEnabled:     s.ToolsEnabled,
-		MemoryEnabled:    s.MemoryEnabled,
-		WebEnabled:       s.WebEnabled,
-		ExecEnabled:      s.ExecEnabled,
-		AffectEnabled:    s.AffectEnabled,
-		AffectInjectMode: s.AffectInjectMode,
-		HumanizeLevel:    s.HumanizeLevel,
+		Enabled:                  true,
+		TriggerMode:              s.TriggerMode,
+		ContextMode:              s.ContextMode,
+		ContextScope:             s.ContextScope,
+		ReplyToBots:              s.ReplyToBots,
+		QuoteReply:               s.QuoteReply,
+		QuoteReplyMode:           s.QuoteReplyMode,
+		ToolsEnabled:             s.ToolsEnabled,
+		MemoryEnabled:            s.MemoryEnabled,
+		WebEnabled:               s.WebEnabled,
+		ExecEnabled:              s.ExecEnabled,
+		AffectEnabled:            s.AffectEnabled,
+		AffectInjectMode:         s.AffectInjectMode,
+		HumanizeLevel:            s.HumanizeLevel,
+		HumanizeTranslateEnabled: s.HumanizeTranslateEnabled,
 		// mode=off 与总开关关闭等效：两者都必须是可靠关闭，不能让
 		// 「enabled=true + mode=off」把未 @ 消息从正常管线里截走。
 		JoinGateEnabled: s.JoinGateEnabled && s.JoinGateMode != "off",
@@ -1289,6 +1296,9 @@ func (m *Manager) GroupConfig(groupOpenID string) GroupConfig {
 		}
 		if ov.Humanize != nil {
 			cfg.HumanizeLevel = *ov.Humanize
+		}
+		if ov.HumanizeTranslate != nil {
+			cfg.HumanizeTranslateEnabled = *ov.HumanizeTranslate
 		}
 		if ov.Affect != nil {
 			// The global switch is a master kill switch: a group override can
@@ -1358,8 +1368,9 @@ type GroupConfig struct {
 	AffectInjectMode string
 	// JoinGateEnabled is the resolved 自主加入 switch for this group. The global
 	// join_gate_enabled is a master kill switch; a group override can only narrow.
-	JoinGateEnabled bool
-	HumanizeLevel   string
+	JoinGateEnabled          bool
+	HumanizeLevel            string
+	HumanizeTranslateEnabled bool
 	// PolishEnabled is the resolved two-stage switch for this group.
 	PolishEnabled  bool
 	TasksEnabled   bool
@@ -1712,6 +1723,8 @@ func applyKey(dst *Settings, key string, raw json.RawMessage) error {
 		return json.Unmarshal(raw, &dst.ReplyDebounceQuietSeconds)
 	case "reply_debounce_active_seconds":
 		return json.Unmarshal(raw, &dst.ReplyDebounceActiveSeconds)
+	case "humanize_translate_enabled":
+		return json.Unmarshal(raw, &dst.HumanizeTranslateEnabled)
 	case "polish_enabled":
 		return json.Unmarshal(raw, &dst.PolishEnabled)
 	case "polish_model":
@@ -1925,6 +1938,7 @@ func overrideIsEmpty(ov GroupOverride) bool {
 		ov.Tasks == nil &&
 		ov.Memory == nil &&
 		ov.Humanize == nil &&
+		ov.HumanizeTranslate == nil &&
 		ov.Affect == nil &&
 		ov.AffectInjectMode == nil &&
 		ov.Polish == nil &&
