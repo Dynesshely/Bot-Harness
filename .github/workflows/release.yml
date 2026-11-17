@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 40
     steps:
       - name: checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Tag 推送会同时触发 CI 与 Release；先等同一个 commit 的 CI 成功，
       # 避免「CI 红但镜像已经发了」。main 上已有成功 CI 时立即通过。
